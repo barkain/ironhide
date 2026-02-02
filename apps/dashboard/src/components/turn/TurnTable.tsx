@@ -8,7 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatCurrency, formatNumber, formatDuration, truncate } from '@/lib/utils';
 import type { SerializedTurn, SerializedTurnMetrics } from '@analytics/shared';
-import { ChevronDown, ChevronUp, Clock, DollarSign, Zap, Wrench } from 'lucide-react';
+import { ChevronDown, ChevronUp, Clock, DollarSign, Gauge, Wrench } from 'lucide-react';
 
 interface TurnTableProps {
   turns: SerializedTurn[];
@@ -109,8 +109,8 @@ function TurnRow({ turn, metrics, isExpanded, onToggle }: TurnRowProps) {
                 {formatDuration(metrics.durationMs)}
               </span>
               <span className="flex items-center gap-1">
-                <Zap className="h-3 w-3" />
-                {formatNumber(metrics.tokens.total)}
+                <Gauge className="h-3 w-3" />
+                {metrics.contextUsagePercent.toFixed(1)}%
               </span>
               <span className="flex items-center gap-1">
                 <DollarSign className="h-3 w-3" />
