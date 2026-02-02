@@ -60,7 +60,8 @@ export function createApp(): Hono {
   const app = new Hono();
 
   // Global middleware
-  app.use('*', logger());
+  // Use stderr for logging to avoid corrupting MCP JSON-RPC protocol on stdout
+  app.use('*', logger((message) => console.error(message)));
   app.use('*', createCorsMiddleware());
   app.use('*', errorHandler);
 
