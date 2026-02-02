@@ -4,6 +4,7 @@ import * as React from 'react';
 import { useState } from 'react';
 import { Maximize2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { InfoTooltip } from '@/components/ui/info-tooltip';
 import { ChartModal } from './ChartModal';
 
 interface ChartCardProps {
@@ -11,6 +12,8 @@ interface ChartCardProps {
   children: React.ReactNode;
   /** Content to render in expanded modal - can be ReactNode or render function for fresh rendering */
   expandedContent?: React.ReactNode | (() => React.ReactNode);
+  /** Optional info tooltip text */
+  info?: string;
 }
 
 /**
@@ -32,14 +35,17 @@ function ExpandedChartContent({
   return <>{expandedContent}</>;
 }
 
-export function ChartCard({ title, children, expandedContent }: ChartCardProps) {
+export function ChartCard({ title, children, expandedContent, info }: ChartCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
     <>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-lg">{title}</CardTitle>
+          <CardTitle className="text-lg flex items-center gap-1.5">
+            {title}
+            {info && <InfoTooltip content={info} />}
+          </CardTitle>
           <button
             onClick={() => setIsExpanded(true)}
             className="rounded-md p-1.5 hover:bg-muted transition-colors"

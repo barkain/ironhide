@@ -182,6 +182,7 @@ export function TokenUsageChart({ data, showBreakdown = true }: TokenUsageChartP
   return (
     <ChartCard
       title="Token Usage Over Turns"
+      info="A turn is one complete user prompt → assistant response cycle, including all tool uses in between."
       expandedContent={() => (
         <TokenUsageLineChart chartData={chartData} showBreakdown={true} showBrush={true} isExpanded={true} />
       )}

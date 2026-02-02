@@ -97,6 +97,7 @@ export function TurnDurationChart({ data }: TurnDurationChartProps) {
   return (
     <ChartCard
       title="Turn Duration"
+      info="A turn is one complete user prompt → assistant response cycle, including all tool uses in between."
       expandedContent={() => (
         <TurnDurationLineChart chartData={chartData} showBrush={true} isExpanded={true} />
       )}

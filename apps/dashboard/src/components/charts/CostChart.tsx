@@ -192,6 +192,7 @@ export function CostChart({ data, showBreakdown = true }: CostChartProps) {
   return (
     <ChartCard
       title="Cumulative Cost Over Turns"
+      info="A turn is one complete user prompt → assistant response cycle, including all tool uses in between."
       expandedContent={() => (
         <CostLineChart chartData={chartData} showBreakdown={true} showBrush={true} isExpanded={true} />
       )}

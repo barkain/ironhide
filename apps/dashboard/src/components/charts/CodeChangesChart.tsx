@@ -132,6 +132,7 @@ export function CodeChangesChart({ data }: CodeChangesChartProps) {
   return (
     <ChartCard
       title="Code Changes"
+      info="A turn is one complete user prompt → assistant response cycle, including all tool uses in between."
       expandedContent={() => (
         <CodeChangesBarChart chartData={chartData} showBrush={true} isExpanded={true} />
       )}
