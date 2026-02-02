@@ -265,23 +265,16 @@ bun run server
 bun run dashboard
 ```
 
-### Development MCP Configuration
+### Development with Hot Reload
 
-The `.mcp.json` includes a development server with hot reload:
+For development with hot reload (file watching), use the dev script instead of running via MCP:
 
-```json
-{
-  "mcpServers": {
-    "analytics-dev": {
-      "command": "bun",
-      "args": ["--watch", "apps/server/src/index.ts", "--mcp", "--with-http"],
-      "env": {
-        "CLAUDE_SESSIONS_PATH": "${HOME}/.claude/projects",
-        "PROJECT_DIR": "${PWD}"
-      }
-    }
-  }
-}
+```bash
+# Start server with hot reload
+bun run dev
+
+# Or run server only with watch mode
+bun --watch apps/server/src/index.ts --mcp --with-http
 ```
 
 ### Project Structure
