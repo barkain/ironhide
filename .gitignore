@@ -1,0 +1,58 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+bun.lockb
+
+# Build outputs
+dist/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# IDE & editors
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+bun-debug.log*
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Cache
+.cache/
+.eslintcache
+.prettiercache
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Debug
+debug/
+*.debug
+
+# Temp files
+tmp/
+temp/
+*.tmp
+
+# Package manager locks (keep bun.lockb, exclude others)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+/.claude/

@@ -1,0 +1,21 @@
+{
+  "name": "claude-code-analytics-dashboard",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "bun run --filter '*' dev",
+    "dev:server": "bun run --cwd apps/server dev:http",
+    "dev:dashboard": "bun run --cwd apps/dashboard dev",
+    "build": "bun run --filter '@analytics/shared' build && bun run --filter '@analytics/dashboard' build && bun run --filter '@analytics/server' build",
+    "start": "bun run --cwd apps/server start:http",
+    "start:mcp": "bun run --cwd apps/server start:mcp",
+    "start:mcp-with-http": "bun run --cwd apps/server start:mcp-with-http",
+    "lint": "bun run --filter '*' lint",
+    "typecheck": "bun run --filter '*' typecheck",
+    "server": "bun run --cwd apps/server dev:http",
+    "dashboard": "bun run --cwd apps/dashboard dev"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}
