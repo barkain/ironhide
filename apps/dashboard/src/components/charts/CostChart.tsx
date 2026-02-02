@@ -40,6 +40,12 @@ function CostLineChart({
   showBrush?: boolean;
   isExpanded?: boolean;
 }) {
+  // Calculate brush indices - when expanded, show all data; otherwise show last 50 points
+  const dataLength = chartData.length;
+  const defaultVisiblePoints = 50;
+  const brushStartIndex = isExpanded ? 0 : Math.max(0, dataLength - defaultVisiblePoints);
+  const brushEndIndex = Math.max(0, dataLength - 1);
+
   return (
     <ResponsiveContainer width="100%" height="100%">
       <LineChart
@@ -103,14 +109,15 @@ function CostLineChart({
             name="Total Cost"
           />
         )}
-        {showBrush && chartData.length > 10 && (
+        {showBrush && dataLength > 10 && (
           <Brush
+            key={`brush-${dataLength}-${isExpanded}`}
             dataKey="turn"
             height={30}
             stroke="hsl(var(--primary))"
             fill="hsl(var(--muted))"
-            startIndex={0}
-            endIndex={isExpanded ? chartData.length - 1 : Math.min(50, chartData.length - 1)}
+            startIndex={brushStartIndex}
+            endIndex={brushEndIndex}
             tickFormatter={(value) => `T${value}`}
           />
         )}
