@@ -83,41 +83,42 @@ function TurnRow({ turn, metrics, isExpanded, onToggle }: TurnRowProps) {
     <div className="border rounded-lg">
       <button
         onClick={onToggle}
-        className="w-full text-left p-4 hover:bg-accent/50 transition-colors flex items-start gap-4"
+        className="w-full text-left p-4 hover:bg-accent/50 transition-colors"
       >
-        <div className="flex items-center gap-2 shrink-0">
-          <Badge variant="outline">Turn {turn.turnNumber}</Badge>
-          {isExpanded ? (
-            <ChevronUp className="h-4 w-4" />
-          ) : (
-            <ChevronDown className="h-4 w-4" />
-          )}
+        {/* Top row: Turn badge + expand icon + stats */}
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2 shrink-0">
+            <Badge variant="outline">Turn {turn.turnNumber}</Badge>
+            {isExpanded ? (
+              <ChevronUp className="h-4 w-4" />
+            ) : (
+              <ChevronDown className="h-4 w-4" />
+            )}
+          </div>
+
+          {/* Stats - compact and always visible */}
+          <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
+            <span className="flex items-center gap-1 whitespace-nowrap">
+              <Clock className="h-3 w-3" />
+              {formatDuration(metrics?.durationMs ?? turn.durationMs ?? 0)}
+            </span>
+            <span className="flex items-center gap-1 whitespace-nowrap">
+              <Gauge className="h-3 w-3" />
+              {(metrics?.contextUsagePercent ?? 0).toFixed(1)}%
+            </span>
+            <span className="flex items-center gap-1 whitespace-nowrap">
+              <DollarSign className="h-3 w-3" />
+              {formatCurrency(metrics?.cost?.total ?? 0)}
+            </span>
+          </div>
         </div>
 
-        <div className="flex-1 min-w-0">
+        {/* Content: User message and assistant response */}
+        <div className="min-w-0">
           <p className="font-medium truncate">{truncate(turn.userMessage, 100)}</p>
           <p className="text-sm text-muted-foreground truncate mt-1">
             {truncate(turn.assistantMessage, 150)}
           </p>
-        </div>
-
-        <div className="shrink-0 flex items-center gap-4 text-sm text-muted-foreground">
-          <span className="flex items-center gap-1">
-            <Clock className="h-3 w-3" />
-            {formatDuration(metrics?.durationMs ?? turn.durationMs ?? 0)}
-          </span>
-          <span className="flex items-center gap-1">
-            <Gauge className="h-3 w-3" />
-            {(metrics?.contextUsagePercent ?? 0).toFixed(1)}%
-          </span>
-          <span className="flex items-center gap-1">
-            <DollarSign className="h-3 w-3" />
-            {formatCurrency(metrics?.cost?.total ?? 0)}
-          </span>
-          <span className="flex items-center gap-1">
-            <Wrench className="h-3 w-3" />
-            {metrics?.toolCount ?? turn.toolUses?.length ?? 0}
-          </span>
         </div>
       </button>
 
