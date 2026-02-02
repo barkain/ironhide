@@ -177,6 +177,25 @@ export function clearFileCache(filePath: string): void {
 }
 
 /**
+ * Clear session cache for a specific session
+ * Call this when a session is deleted to prevent memory leaks
+ */
+export function clearSessionCache(sessionId: string): void {
+  // Get all files associated with this session
+  const files = sessionFiles.get(sessionId);
+  if (files) {
+    // Clear entry cache for each file
+    for (const filePath of files) {
+      entryCache.delete(filePath);
+    }
+  }
+  // Remove session from sessionFiles map
+  sessionFiles.delete(sessionId);
+  // Remove from session entry cache
+  sessionEntryCache.delete(sessionId);
+}
+
+/**
  * Clear all caches
  */
 export function clearAllCaches(): void {

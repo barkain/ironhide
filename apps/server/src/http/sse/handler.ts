@@ -27,30 +27,59 @@ export async function handleSSEConnection(c: Context): Promise<Response> {
   const sessionId = c.req.query('sessionId') ?? null;
   const clientId = generateClientId();
 
+  // Track cleanup state to prevent double cleanup
+  let cleanedUp = false;
+
   // Create a readable/writable stream pair
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
   const encoder = new TextEncoder();
 
-  // Send helper function
-  const send = async (message: string): Promise<void> => {
-    try {
-      await writer.write(encoder.encode(message));
-    } catch (error) {
-      console.error('Error sending SSE message:', error);
-    }
-  };
-
   // Setup heartbeat interval
   let heartbeatInterval: NodeJS.Timeout | null = null;
 
-  // Cleanup function
+  // Cleanup function - handles all resource cleanup
   const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+
     if (heartbeatInterval) {
       clearInterval(heartbeatInterval);
       heartbeatInterval = null;
     }
     sseBroadcaster.removeClient(clientId);
+
+    // Close the writer if it's not already closed
+    try {
+      writer.close().catch(() => {
+        // Ignore close errors - stream may already be closed
+      });
+    } catch {
+      // Ignore errors during cleanup
+    }
+  };
+
+  // Listen for client disconnect via the request's abort signal
+  // This is triggered when the client closes the connection
+  const abortSignal = c.req.raw.signal;
+  if (abortSignal) {
+    abortSignal.addEventListener('abort', () => {
+      cleanup();
+    }, { once: true });
+  }
+
+  // Send helper function with error handling that triggers cleanup
+  const send = async (message: string): Promise<boolean> => {
+    if (cleanedUp) return false;
+
+    try {
+      await writer.write(encoder.encode(message));
+      return true;
+    } catch (error) {
+      console.error('Error sending SSE message:', error);
+      cleanup();
+      return false;
+    }
   };
 
   // Initialize connection
@@ -60,7 +89,7 @@ export async function handleSSEConnection(c: Context): Promise<Response> {
       sseBroadcaster.addClient(clientId, sessionId, writer);
 
       // Send connected event
-      await send(createConnectedEvent(sessionId));
+      if (!await send(createConnectedEvent(sessionId))) return;
 
       // If session specified, send initial snapshot
       if (sessionId) {
@@ -69,10 +98,10 @@ export async function handleSSEConnection(c: Context): Promise<Response> {
           const turns = sessionStore.getSessionTurns(sessionId);
           const metrics = sessionStore.getSessionMetrics(sessionId);
           if (metrics) {
-            await send(createSessionSnapshotEvent(session, turns, metrics));
+            if (!await send(createSessionSnapshotEvent(session, turns, metrics))) return;
           }
         } else {
-          await send(createErrorEvent('SESSION_NOT_FOUND', `Session not found: ${sessionId}`));
+          if (!await send(createErrorEvent('SESSION_NOT_FOUND', `Session not found: ${sessionId}`))) return;
         }
       } else {
         // Send current session if available
@@ -83,17 +112,17 @@ export async function handleSSEConnection(c: Context): Promise<Response> {
             const turns = sessionStore.getSessionTurns(currentSessionId);
             const metrics = sessionStore.getSessionMetrics(currentSessionId);
             if (metrics) {
-              await send(createSessionSnapshotEvent(session, turns, metrics));
+              if (!await send(createSessionSnapshotEvent(session, turns, metrics))) return;
             }
           }
         }
       }
 
-      // Setup heartbeat
+      // Setup heartbeat - this also serves as a connection health check
+      // The heartbeat will detect disconnected clients that didn't trigger abort
       heartbeatInterval = setInterval(async () => {
-        try {
-          await send(createHeartbeatEvent());
-        } catch {
+        const success = await send(createHeartbeatEvent());
+        if (!success) {
           cleanup();
         }
       }, SERVER_CONFIG.sseHeartbeatInterval);

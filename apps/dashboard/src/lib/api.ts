@@ -162,3 +162,24 @@ export interface TurnDetailResponse {
 export async function fetchTurn(turnId: string): Promise<TurnDetailResponse> {
   return fetchAPI<TurnDetailResponse>(`/turns/${turnId}`);
 }
+
+/**
+ * Scan response type
+ */
+export interface ScanSessionsResponse {
+  loaded: number;
+  skipped: number;
+  total: number;
+  sessionsPath: string;
+}
+
+/**
+ * Trigger a scan for existing JSONL files
+ * This is called when the dashboard opens to load historical session data
+ * The endpoint is idempotent - calling it multiple times is safe
+ */
+export async function scanSessions(): Promise<ScanSessionsResponse> {
+  return fetchAPI<ScanSessionsResponse>('/sessions/scan', {
+    method: 'POST',
+  });
+}

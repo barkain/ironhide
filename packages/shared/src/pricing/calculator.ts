@@ -62,16 +62,22 @@ export function calculateTokenCost(
 /**
  * Calculate context usage percentage
  *
+ * Context usage includes both input tokens and cache read tokens,
+ * as cached tokens still occupy space in the context window.
+ *
  * @param inputTokens - Number of input tokens used
  * @param modelId - Model identifier for context limit lookup
+ * @param cacheReadTokens - Number of cache read tokens (default: 0)
  * @returns Percentage of context window used (0-100)
  */
 export function calculateContextUsage(
   inputTokens: number,
-  modelId: string
+  modelId: string,
+  cacheReadTokens: number = 0
 ): number {
   const pricing = getModelPricingOrDefault(modelId);
-  const percentage = (inputTokens / pricing.maxContextTokens) * 100;
+  const totalContextTokens = inputTokens + cacheReadTokens;
+  const percentage = (totalContextTokens / pricing.maxContextTokens) * 100;
   return Math.min(100, Math.max(0, roundToTwoDecimals(percentage)));
 }
 

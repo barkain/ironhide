@@ -48,10 +48,11 @@ export function calculateTurnMetrics(turn: Turn): TurnMetrics {
   // Cost metrics
   const cost = calculateTurnCost(turn.usage, turn.model);
 
-  // Context usage
+  // Context usage (includes both input tokens and cache read tokens)
   const contextUsagePercent = calculateContextUsage(
     turn.usage.input_tokens,
-    turn.model
+    turn.model,
+    turn.usage.cache_read_input_tokens
   );
 
   // Tool breakdown

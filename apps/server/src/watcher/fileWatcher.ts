@@ -62,7 +62,7 @@ class FileWatcher {
 
     this.watcher = chokidar.watch(watchPath, {
       persistent: true,
-      ignoreInitial: false, // Process existing files on start
+      ignoreInitial: true, // Only watch for new changes, load existing data lazily on demand
       awaitWriteFinish: {
         stabilityThreshold: SERVER_CONFIG.watcherDebounceMs,
         pollInterval: 50,

@@ -31,6 +31,7 @@ interface TurnBuilder {
   toolUses: Map<string, ToolUse>;
   startedAt: Date | null;
   endedAt: Date | null;
+  agentId?: string; // Agent ID if this is a subagent turn
 }
 
 /**
@@ -77,6 +78,7 @@ export function aggregateEntriesIntoTurns(
         toolUses: new Map(),
         startedAt: validated.timestamp,
         endedAt: null,
+        agentId: entry.agentId, // Capture agent ID from raw entry
       };
     } else if (validated.isUserMessage && currentTurn) {
       // This is a tool result message (user role but not human message)
@@ -192,6 +194,14 @@ function buildTurn(builder: TurnBuilder): Turn | null {
   // Generate turn ID
   const turnId = `${builder.sessionId}-turn-${builder.turnNumber}`;
 
+  // Determine if this is a subagent turn
+  // A turn is a subagent if:
+  // 1. It has an agentId field (from JSONL entry), OR
+  // 2. The user message starts with "Agent:" pattern (legacy detection)
+  const agentId = builder.agentId;
+  const hasAgentPrefix = /^Agent:\s*\S+/i.test(userMessage);
+  const isSubagent = !!agentId || hasAgentPrefix;
+
   return {
     id: turnId,
     sessionId: builder.sessionId,
@@ -205,6 +215,8 @@ function buildTurn(builder: TurnBuilder): Turn | null {
     toolUses,
     codeChanges,
     model,
+    agentId,
+    isSubagent,
   };
 }
 

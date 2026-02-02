@@ -9,7 +9,7 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /**
- * Format a number as currency (USD)
+ * Format a number as currency (USD) with full precision
  */
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -17,6 +17,18 @@ export function formatCurrency(amount: number): string {
     currency: 'USD',
     minimumFractionDigits: 4,
     maximumFractionDigits: 4,
+  }).format(amount);
+}
+
+/**
+ * Format a number as currency (USD) in compact form for tight spaces
+ */
+export function formatCurrencyCompact(amount: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(amount);
 }
 

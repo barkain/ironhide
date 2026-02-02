@@ -6,6 +6,7 @@ import { SSEClient, getSSEClient } from '@/lib/sse';
 import { queryKeys } from '@/lib/queryClient';
 import { useSessionStore } from '@/stores/sessionStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { scanSessions } from '@/lib/api';
 import type {
   SSEConnectionStatus,
   SSESessionEvent,
@@ -18,11 +19,35 @@ import type {
  */
 export function useSSESubscription(sessionId?: string) {
   const [status, setStatus] = useState<SSEConnectionStatus>('disconnected');
+  const [scanComplete, setScanComplete] = useState(false);
   const clientRef = useRef<SSEClient | null>(null);
+  const hasScanTriggered = useRef(false);
   const queryClient = useQueryClient();
 
   const { setCurrentSession, setSessionMetrics, addTurn, updateTurn } = useSessionStore();
   const realTimeEnabled = useSettingsStore((state) => state.realTimeEnabled);
+
+  /**
+   * Trigger a scan for existing JSONL files when dashboard loads
+   * This enables lazy loading - files are loaded on demand, not at server startup
+   */
+  const triggerScan = useCallback(async () => {
+    if (hasScanTriggered.current) return;
+    hasScanTriggered.current = true;
+
+    try {
+      const result = await scanSessions();
+      console.log(`[SSE] Initial scan complete: ${result.loaded} files loaded, ${result.skipped} skipped`);
+      setScanComplete(true);
+
+      // Invalidate session queries to load the newly discovered sessions
+      queryClient.invalidateQueries({ queryKey: queryKeys.sessions.all });
+    } catch (error) {
+      console.warn('[SSE] Failed to scan existing sessions:', error);
+      // Don't block SSE connection if scan fails
+      setScanComplete(true);
+    }
+  }, [queryClient]);
 
   const connect = useCallback(() => {
     if (!realTimeEnabled) return;
@@ -82,6 +107,10 @@ export function useSSESubscription(sessionId?: string) {
 
     // Connect
     client.connect();
+
+    // Trigger scan for existing files after connection
+    // This loads historical data on demand (lazy loading)
+    triggerScan();
   }, [
     sessionId,
     realTimeEnabled,
@@ -90,6 +119,7 @@ export function useSSESubscription(sessionId?: string) {
     setSessionMetrics,
     addTurn,
     updateTurn,
+    triggerScan,
   ]);
 
   const disconnect = useCallback(() => {
@@ -123,6 +153,7 @@ export function useSSESubscription(sessionId?: string) {
     isConnected: status === 'connected',
     isConnecting: status === 'connecting',
     isError: status === 'error',
+    scanComplete,
     connect,
     disconnect,
   };

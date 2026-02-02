@@ -101,9 +101,10 @@ async function startHttpServer(): Promise<void> {
 }
 
 /**
- * Start the file watcher
+ * Start the file watcher (non-blocking)
+ * Logs startup info and begins watching in background
  */
-async function startFileWatcher(): Promise<void> {
+function startFileWatcherInBackground(): void {
   if (!isMcpMode()) {
     console.log(`Watching for JSONL files in: ${CLAUDE_SESSIONS_PATH}`);
     const projectDir = getCurrentProjectDir();
@@ -113,7 +114,11 @@ async function startFileWatcher(): Promise<void> {
       console.log(`  - Mode: All projects (no PROJECT_DIR set)`);
     }
   }
-  await fileWatcher.start();
+  // Start watcher in background - don't block server startup
+  // Files will be discovered and processed as the scan progresses
+  fileWatcher.start().catch((error) => {
+    console.error('File watcher failed to start:', error);
+  });
 }
 
 /**
@@ -194,9 +199,6 @@ async function main(): Promise<void> {
   }
 
   try {
-    // Always start file watcher for session data
-    await startFileWatcher();
-
     if (mcpMode) {
       // MCP Plugin Mode
       // Start HTTP server in background if enabled (for dashboard API)
@@ -204,17 +206,24 @@ async function main(): Promise<void> {
         await startHttpServer();
       }
 
+      // Start file watcher in background for session data
+      startFileWatcherInBackground();
+
       // Start MCP server with stdio transport
       // This will block and handle MCP JSON-RPC protocol
       await startMcpServer();
     } else {
       // Standalone HTTP Server Mode
-      // Dashboard is served as static files from the same port
+      // Start HTTP server first for fast startup
       await startHttpServer();
 
       console.log('');
       console.log('Server started successfully!');
       console.log('');
+
+      // Start file watcher in background - existing files will be discovered
+      // and processed as the scan progresses (non-blocking)
+      startFileWatcherInBackground();
     }
   } catch (error) {
     console.error('Failed to start server:', error);

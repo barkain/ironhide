@@ -36,6 +36,12 @@ export interface RawJSONLEntry {
 
   /** Request ID for grouping streaming chunks */
   requestId?: string;
+
+  /** Agent ID for subagent turns (e.g., "Explore", "general-purpose") */
+  agentId?: string;
+
+  /** Type of entry */
+  type?: 'user' | 'assistant' | 'summary';
 }
 
 /**

@@ -60,7 +60,7 @@ export function EfficiencyScore({ efficiency }: EfficiencyScoreProps) {
           />
           <EfficiencyMetric
             label="Context Efficiency"
-            value={contextEfficiency * 100}
+            value={contextEfficiency}
             description="Output per context window used"
           />
         </div>

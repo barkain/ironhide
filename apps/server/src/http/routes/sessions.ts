@@ -1,17 +1,107 @@
 /**
- * Session routes (GET /sessions, GET /sessions/:id)
+ * Session routes (GET /sessions, GET /sessions/:id, POST /sessions/scan)
  */
 
 import { Hono } from 'hono';
+import { readdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { sessionStore } from '../../store/sessionStore.js';
 import { NotFoundError, ValidationError } from '../middleware/error.js';
-import { SERVER_CONFIG } from '../../config/index.js';
+import { SERVER_CONFIG, CLAUDE_SESSIONS_PATH } from '../../config/index.js';
 import { serializeSession } from '@analytics/shared';
+import { processFile } from '../../parser/index.js';
+
+/**
+ * Track files that have been scanned to avoid reprocessing
+ */
+const scannedFiles = new Set<string>();
+
+/**
+ * Recursively find all .jsonl files in a directory
+ */
+async function findJsonlFiles(dir: string): Promise<string[]> {
+  const files: string[] = [];
+
+  try {
+    const entries = await readdir(dir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const fullPath = join(dir, entry.name);
+
+      if (entry.isDirectory()) {
+        // Recurse into subdirectories
+        const subFiles = await findJsonlFiles(fullPath);
+        files.push(...subFiles);
+      } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+        files.push(fullPath);
+      }
+    }
+  } catch (error) {
+    // Directory might not exist or be inaccessible
+    console.warn(`Could not read directory ${dir}:`, error);
+  }
+
+  return files;
+}
+
+/**
+ * Scan existing JSONL files and process them in batches
+ * This enables lazy loading - files are loaded on demand, not at server startup
+ */
+async function scanExistingFiles(): Promise<{ loaded: number; skipped: number; total: number }> {
+  const files = await findJsonlFiles(CLAUDE_SESSIONS_PATH);
+
+  // Filter out already scanned files
+  const newFiles = files.filter(f => !scannedFiles.has(f));
+  const skipped = files.length - newFiles.length;
+
+  let loaded = 0;
+  const batchSize = 50;
+
+  for (let i = 0; i < newFiles.length; i += batchSize) {
+    const batch = newFiles.slice(i, i + batchSize);
+
+    // Process batch in parallel
+    await Promise.all(batch.map(async (filePath) => {
+      try {
+        await processFile(filePath);
+        scannedFiles.add(filePath);
+        loaded++;
+      } catch (error) {
+        console.error(`Error processing file ${filePath}:`, error);
+      }
+    }));
+
+    // Yield to event loop between batches to prevent blocking
+    if (i + batchSize < newFiles.length) {
+      await new Promise(resolve => setImmediate(resolve));
+    }
+  }
+
+  return { loaded, skipped, total: files.length };
+}
 
 /**
  * Sessions router
  */
 export const sessionsRouter = new Hono();
+
+/**
+ * POST /sessions/scan - Scan and load existing JSONL files on demand
+ * This enables lazy loading - files are loaded when dashboard opens, not at server startup
+ */
+sessionsRouter.post('/scan', async (c) => {
+  console.log('Scanning for existing JSONL files...');
+  const result = await scanExistingFiles();
+  console.log(`Scan complete: ${result.loaded} loaded, ${result.skipped} skipped, ${result.total} total files`);
+
+  return c.json({
+    loaded: result.loaded,
+    skipped: result.skipped,
+    total: result.total,
+    sessionsPath: CLAUDE_SESSIONS_PATH,
+  });
+});
 
 /**
  * GET /sessions - List all sessions with summary metrics

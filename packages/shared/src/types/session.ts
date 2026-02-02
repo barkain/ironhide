@@ -75,6 +75,12 @@ export interface Turn {
 
   /** Model used for this turn */
   model: string;
+
+  /** Agent ID if this is a subagent turn (e.g., "Explore", "general-purpose") */
+  agentId?: string;
+
+  /** Whether this turn is from a subagent */
+  isSubagent: boolean;
 }
 
 /**
@@ -151,4 +157,6 @@ export interface SerializedTurn {
   toolUses: ToolUse[];
   codeChanges: CodeChange[];
   model: string;
+  agentId?: string;
+  isSubagent: boolean;
 }
