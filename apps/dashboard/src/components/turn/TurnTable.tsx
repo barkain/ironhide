@@ -40,7 +40,7 @@ export function TurnTable({
       </CardHeader>
       <CardContent>
         <ScrollArea className="h-[500px]">
-          <div className="space-y-2">
+          <div className="space-y-2 pr-4">
             {turns.map((turn) => {
               const turnMetrics = metricsMap.get(turn.id);
               const isExpanded = expandedTurn === turn.id;
@@ -102,26 +102,22 @@ function TurnRow({ turn, metrics, isExpanded, onToggle }: TurnRowProps) {
         </div>
 
         <div className="shrink-0 flex items-center gap-4 text-sm text-muted-foreground">
-          {metrics && (
-            <>
-              <span className="flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                {formatDuration(metrics.durationMs)}
-              </span>
-              <span className="flex items-center gap-1">
-                <Gauge className="h-3 w-3" />
-                {metrics.contextUsagePercent.toFixed(1)}%
-              </span>
-              <span className="flex items-center gap-1">
-                <DollarSign className="h-3 w-3" />
-                {formatCurrency(metrics.cost.total)}
-              </span>
-              <span className="flex items-center gap-1">
-                <Wrench className="h-3 w-3" />
-                {metrics.toolCount}
-              </span>
-            </>
-          )}
+          <span className="flex items-center gap-1">
+            <Clock className="h-3 w-3" />
+            {formatDuration(metrics?.durationMs ?? turn.durationMs)}
+          </span>
+          <span className="flex items-center gap-1">
+            <Gauge className="h-3 w-3" />
+            {(metrics?.contextUsagePercent ?? 0).toFixed(1)}%
+          </span>
+          <span className="flex items-center gap-1">
+            <DollarSign className="h-3 w-3" />
+            {formatCurrency(metrics?.cost?.total ?? 0)}
+          </span>
+          <span className="flex items-center gap-1">
+            <Wrench className="h-3 w-3" />
+            {metrics?.toolCount ?? turn.toolUses.length}
+          </span>
         </div>
       </button>
 
