@@ -86,6 +86,10 @@ function extractWriteChanges(tool: ToolUse): CodeChange[] {
 
 /**
  * Extract changes from Edit tool
+ *
+ * For edit operations, we track the net difference rather than raw counts.
+ * If replacing 5 lines with 7 lines, we show +2 added (not +7 added, -5 removed).
+ * This gives a cleaner view of actual codebase growth/shrinkage.
  */
 function extractEditChanges(tool: ToolUse): CodeChange[] {
   const input = tool.input as {
@@ -99,12 +103,15 @@ function extractEditChanges(tool: ToolUse): CodeChange[] {
   const oldLines = (input.old_string ?? '').split('\n').length;
   const newLines = (input.new_string ?? '').split('\n').length;
 
+  // Calculate net change - only show additions OR deletions, not both
+  const netChange = newLines - oldLines;
+
   return [
     {
       filePath: input.file_path,
       type: 'modify',
-      linesAdded: newLines,
-      linesRemoved: oldLines,
+      linesAdded: netChange > 0 ? netChange : 0,
+      linesRemoved: netChange < 0 ? Math.abs(netChange) : 0,
       extension: extname(input.file_path).slice(1) || 'unknown',
     },
   ];
@@ -112,6 +119,8 @@ function extractEditChanges(tool: ToolUse): CodeChange[] {
 
 /**
  * Extract changes from MultiEdit tool
+ *
+ * Same as Edit - track net difference for cleaner visualization.
  */
 function extractMultiEditChanges(tool: ToolUse): CodeChange[] {
   const input = tool.input as {
@@ -129,12 +138,15 @@ function extractMultiEditChanges(tool: ToolUse): CodeChange[] {
     totalNewLines += (edit.new_string ?? '').split('\n').length;
   }
 
+  // Calculate net change
+  const netChange = totalNewLines - totalOldLines;
+
   return [
     {
       filePath: input.file_path,
       type: 'modify',
-      linesAdded: totalNewLines,
-      linesRemoved: totalOldLines,
+      linesAdded: netChange > 0 ? netChange : 0,
+      linesRemoved: netChange < 0 ? Math.abs(netChange) : 0,
       extension: extname(input.file_path).slice(1) || 'unknown',
     },
   ];
