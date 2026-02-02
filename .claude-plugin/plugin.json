@@ -12,8 +12,7 @@
       "command": "bun",
       "args": ["run", "${CLAUDE_PLUGIN_ROOT}/apps/server/src/index.ts", "--mcp", "--with-http"],
       "env": {
-        "CLAUDE_SESSIONS_PATH": "${HOME}/.claude/projects",
-        "PROJECT_DIR": "${PWD}"
+        "CLAUDE_SESSIONS_PATH": "${HOME}/.claude/projects"
       }
     }
   }

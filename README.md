@@ -106,8 +106,7 @@ The `.mcp.json` file at the project root automatically registers the MCP server 
       "command": "bun",
       "args": ["run", "apps/server/src/index.ts", "--mcp", "--with-http"],
       "env": {
-        "CLAUDE_SESSIONS_PATH": "${HOME}/.claude/projects",
-        "PROJECT_DIR": "${PWD}"
+        "CLAUDE_SESSIONS_PATH": "${HOME}/.claude/projects"
       }
     }
   }
