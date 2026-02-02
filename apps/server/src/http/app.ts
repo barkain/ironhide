@@ -31,6 +31,10 @@ function getDashboardStaticPath(): string | null {
   const possiblePaths = [
     // Environment variable override (highest priority)
     process.env.DASHBOARD_STATIC_PATH,
+    // Plugin root (set by Claude Code when running as plugin via --plugin-dir)
+    process.env.CLAUDE_PLUGIN_ROOT
+      ? join(process.env.CLAUDE_PLUGIN_ROOT, 'apps', 'dashboard', 'out')
+      : null,
     // Relative to this file: apps/server/src/http/app.ts -> apps/dashboard/out
     // From src/http: go up 4 levels (http -> src -> server -> apps) then into dashboard/out
     join(__dirname, '..', '..', '..', 'dashboard', 'out'),
