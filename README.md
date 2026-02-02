@@ -82,9 +82,20 @@ PORT=3001 bun run dashboard
 # Opens at http://localhost:3001
 ```
 
-## Auto-Start Options
+## Installation Options
 
-### Option 1: Project-Scoped (Default)
+### Option 1: Use as Plugin (Recommended)
+
+Load the plugin from any project using `--plugin-dir`:
+
+```bash
+cd your-project
+claude --plugin-dir /path/to/claude-code-analytics-dashboard
+```
+
+This uses the `.claude-plugin/plugin.json` manifest to register the MCP server.
+
+### Option 2: Project-Scoped (Auto-Start)
 
 The `.mcp.json` file at the project root automatically registers the MCP server when Claude Code opens this directory. No additional setup required.
 
@@ -103,7 +114,7 @@ The `.mcp.json` file at the project root automatically registers the MCP server 
 }
 ```
 
-### Option 2: User-Scoped (All Projects)
+### Option 3: User-Scoped (All Projects)
 
 To auto-start the analytics server in ALL Claude Code sessions, run the setup script:
 
@@ -113,7 +124,7 @@ To auto-start the analytics server in ALL Claude Code sessions, run the setup sc
 
 This adds the MCP server to your `~/.claude.json` user configuration.
 
-### Option 3: Manual Installation
+### Option 4: Manual CLI Installation
 
 If you prefer manual control:
 
