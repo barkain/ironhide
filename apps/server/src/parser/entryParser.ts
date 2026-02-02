@@ -32,6 +32,8 @@ export interface ValidatedEntry {
   isUserMessage: boolean;
   /** Whether this is an assistant message */
   isAssistantMessage: boolean;
+  /** Whether this is a HUMAN user message (starts a new cycle) vs tool result */
+  isHumanMessage: boolean;
 }
 
 /**
@@ -65,6 +67,20 @@ export function validateEntry(
   // Get usage
   const usage = raw.message.usage ?? null;
 
+  // Determine if this is a user message
+  const isUserMessage = raw.message.role === 'user';
+
+  // A HUMAN message is a user message that:
+  // 1. Has text content (user typed something)
+  // 2. Does NOT have tool_result blocks (not a tool result submission)
+  // 3. Entry type is 'user' (not 'assistant' or 'summary')
+  // This distinguishes genuine user prompts from tool result messages
+  const isHumanMessage =
+    isUserMessage &&
+    textContent.trim().length > 0 &&
+    toolResults.length === 0 &&
+    (raw as { type?: string }).type !== 'assistant';
+
   return {
     success: true,
     entry: {
@@ -74,8 +90,9 @@ export function validateEntry(
       toolUses,
       toolResults,
       usage,
-      isUserMessage: raw.message.role === 'user',
+      isUserMessage,
       isAssistantMessage: raw.message.role === 'assistant',
+      isHumanMessage,
     },
   };
 }
