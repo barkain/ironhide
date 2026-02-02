@@ -41,17 +41,18 @@ The plugin consists of two components:
 
 ### Quick Start (Auto-Start Enabled)
 
-1. Clone and build:
+1. Clone and install:
    ```bash
    git clone <repo-url> claude-code-analytics-dashboard
    cd claude-code-analytics-dashboard
    bun install
-   bun run build
    ```
 
 2. **That's it!** The plugin auto-starts when you open Claude Code in this directory.
 
 The `.mcp.json` file is pre-configured to auto-register the MCP server with the dashboard HTTP server enabled.
+
+> **Note**: No build step required for auto-start. Bun runs TypeScript directly from source.
 
 ### Verify Installation
 
@@ -94,7 +95,8 @@ The `.mcp.json` file at the project root automatically registers the MCP server 
       "command": "bun",
       "args": ["run", "apps/server/src/index.ts", "--mcp", "--with-http"],
       "env": {
-        "CLAUDE_SESSIONS_PATH": "${HOME}/.claude/projects"
+        "CLAUDE_SESSIONS_PATH": "${HOME}/.claude/projects",
+        "PROJECT_DIR": "${PWD}"
       }
     }
   }
@@ -116,11 +118,20 @@ This adds the MCP server to your `~/.claude.json` user configuration.
 If you prefer manual control:
 
 ```bash
-# Add to current project only
-claude mcp add analytics -- bun "$(pwd)/apps/server/dist/index.js" --mcp --with-http
+# Add to current project only (runs TypeScript directly)
+claude mcp add analytics -- bun run "$(pwd)/apps/server/src/index.ts" --mcp --with-http
 
 # Add to all projects (user scope)
-claude mcp add analytics --scope user -- bun "$(pwd)/apps/server/dist/index.js" --mcp --with-http
+claude mcp add analytics --scope user -- bun run "$(pwd)/apps/server/src/index.ts" --mcp --with-http
+```
+
+For production use with built JavaScript:
+```bash
+# First build the project
+bun run build
+
+# Then add using the compiled output
+claude mcp add analytics -- bun "$(pwd)/apps/server/dist/index.js" --mcp --with-http
 ```
 
 ### Remove the Plugin
@@ -252,7 +263,11 @@ The `.mcp.json` includes a development server with hot reload:
   "mcpServers": {
     "analytics-dev": {
       "command": "bun",
-      "args": ["--watch", "apps/server/src/index.ts", "--mcp", "--with-http"]
+      "args": ["--watch", "apps/server/src/index.ts", "--mcp", "--with-http"],
+      "env": {
+        "CLAUDE_SESSIONS_PATH": "${HOME}/.claude/projects",
+        "PROJECT_DIR": "${PWD}"
+      }
     }
   }
 }
@@ -318,15 +333,28 @@ Then start normally and the configured ports will be used automatically.
 
 ### MCP Mode Options
 
+Running from source (recommended for development):
 ```bash
 # MCP only (stdio transport)
-bun dist/index.js --mcp
+bun run apps/server/src/index.ts --mcp
 
 # MCP with HTTP server for dashboard (recommended)
-bun dist/index.js --mcp --with-http
+bun run apps/server/src/index.ts --mcp --with-http
 
 # HTTP only (default when run directly)
-bun dist/index.js
+bun run apps/server/src/index.ts
+```
+
+Running from built output (after `bun run build`):
+```bash
+# MCP only (stdio transport)
+bun apps/server/dist/index.js --mcp
+
+# MCP with HTTP server for dashboard (recommended)
+bun apps/server/dist/index.js --mcp --with-http
+
+# HTTP only (default when run directly)
+bun apps/server/dist/index.js
 ```
 
 ## API Reference
@@ -365,9 +393,10 @@ bun dist/index.js
 
 ### MCP Server Not Starting
 
-1. Ensure the project is built: `bun run build`
+1. Ensure dependencies are installed: `bun install`
 2. Check Claude Code MCP status: `/mcp`
-3. Verify the server path exists: `ls apps/server/dist/index.js`
+3. Verify the server source exists: `ls apps/server/src/index.ts`
+4. If using built output, ensure project is built: `bun run build && ls apps/server/dist/index.js`
 
 ### Dashboard Not Accessible
 
