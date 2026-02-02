@@ -108,6 +108,17 @@ export function createApp(): Hono {
   if (dashboardPath) {
     console.log(`[Static] Serving dashboard from: ${dashboardPath}`);
 
+    // Block direct access to RSC payload files (.txt) - these are internal Next.js files
+    app.use('*.txt', (c, next) => {
+      // Redirect .txt requests to index.html for SPA routing
+      const indexPath = join(dashboardPath, 'index.html');
+      if (existsSync(indexPath)) {
+        const html = readFileSync(indexPath, 'utf-8');
+        return c.html(html);
+      }
+      return next();
+    });
+
     // Serve static assets (JS, CSS, images, etc.)
     // Use absolute path - despite docs warning, @hono/node-server serveStatic works with absolute paths
     app.use(
