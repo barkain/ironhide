@@ -68,34 +68,34 @@ claude mcp list
 
 ### Access the Dashboard
 
-The HTTP dashboard API is available at **http://localhost:3100** when the MCP server is running.
+The dashboard is available at **http://localhost:3100** when the MCP server is running. No separate command needed - the dashboard UI is served automatically alongside the API.
 
-For the full dashboard UI:
+For development with hot reload:
 ```bash
 bun run dashboard
-# Opens at http://localhost:3000 (or custom PORT if set)
-```
-
-You can customize the port:
-```bash
-PORT=3001 bun run dashboard
-# Opens at http://localhost:3001
+# Development server at http://localhost:3000
 ```
 
 ## Installation Options
 
-### Option 1: Use as Plugin (Recommended)
+### Option 1: Install from Plugin Directory (Recommended)
 
-Load the plugin from any project using `--plugin-dir`:
+Use the `--plugin-dir` flag to load the plugin when starting Claude Code:
 
 ```bash
-cd your-project
+# From any project directory
 claude --plugin-dir /path/to/claude-code-analytics-dashboard
 ```
 
-This uses the `.claude-plugin/plugin.json` manifest to register the MCP server.
+Or use the `/plugin` slash command from within Claude Code:
 
-### Option 2: Project-Scoped (Auto-Start)
+```
+/plugin add /path/to/claude-code-analytics-dashboard
+```
+
+This uses the `.claude-plugin/plugin.json` manifest to register the MCP server. The dashboard is automatically served at **http://localhost:3100**.
+
+### Option 2: Project-Scoped (Auto-Start in This Directory)
 
 The `.mcp.json` file at the project root automatically registers the MCP server when Claude Code opens this directory. No additional setup required.
 
@@ -114,7 +114,19 @@ The `.mcp.json` file at the project root automatically registers the MCP server 
 }
 ```
 
-### Option 3: User-Scoped (All Projects)
+### Option 3: Install from Marketplace
+
+If this plugin is published to a marketplace, install it with:
+
+```bash
+# From CLI
+claude plugin install claude-code-analytics@marketplace-name
+
+# Or from within Claude Code
+/plugin install claude-code-analytics@marketplace-name
+```
+
+### Option 4: User-Scoped (All Projects)
 
 To auto-start the analytics server in ALL Claude Code sessions, run the setup script:
 
@@ -124,29 +136,14 @@ To auto-start the analytics server in ALL Claude Code sessions, run the setup sc
 
 This adds the MCP server to your `~/.claude.json` user configuration.
 
-### Option 4: Manual CLI Installation
-
-If you prefer manual control:
-
-```bash
-# Add to current project only (runs TypeScript directly)
-claude mcp add analytics -- bun run "$(pwd)/apps/server/src/index.ts" --mcp --with-http
-
-# Add to all projects (user scope)
-claude mcp add analytics --scope user -- bun run "$(pwd)/apps/server/src/index.ts" --mcp --with-http
-```
-
-For production use with built JavaScript:
-```bash
-# First build the project
-bun run build
-
-# Then add using the compiled output
-claude mcp add analytics -- bun "$(pwd)/apps/server/dist/index.js" --mcp --with-http
-```
-
 ### Remove the Plugin
 
+From within Claude Code:
+```
+/plugin remove claude-code-analytics
+```
+
+Or remove the MCP server directly:
 ```bash
 claude mcp remove analytics
 ```
@@ -221,22 +218,17 @@ The web dashboard provides real-time visualization of your session analytics.
 
 ### Dashboard Access
 
-When running with `--with-http` flag (default in auto-start config):
+When running with `--with-http` flag (default in all configurations), the dashboard is served at:
 
-- **API Server**: http://localhost:3100
+- **Dashboard UI**: http://localhost:3100
 - **Health Check**: http://localhost:3100/health
+- **API Endpoints**: http://localhost:3100/api/*
 - **SSE Stream**: http://localhost:3100/api/sse
 
-For the full Next.js dashboard UI:
+For development with hot reload:
 ```bash
 bun run dashboard
-# Opens at http://localhost:3000
-```
-
-With custom port:
-```bash
-PORT=3001 bun run dashboard
-# Opens at http://localhost:3001
+# Development server at http://localhost:3000
 ```
 
 ### Dashboard Features
