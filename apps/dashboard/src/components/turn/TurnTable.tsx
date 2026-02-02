@@ -104,7 +104,7 @@ function TurnRow({ turn, metrics, isExpanded, onToggle }: TurnRowProps) {
         <div className="shrink-0 flex items-center gap-4 text-sm text-muted-foreground">
           <span className="flex items-center gap-1">
             <Clock className="h-3 w-3" />
-            {formatDuration(metrics?.durationMs ?? turn.durationMs)}
+            {formatDuration(metrics?.durationMs ?? turn.durationMs ?? 0)}
           </span>
           <span className="flex items-center gap-1">
             <Gauge className="h-3 w-3" />
@@ -116,7 +116,7 @@ function TurnRow({ turn, metrics, isExpanded, onToggle }: TurnRowProps) {
           </span>
           <span className="flex items-center gap-1">
             <Wrench className="h-3 w-3" />
-            {metrics?.toolCount ?? turn.toolUses.length}
+            {metrics?.toolCount ?? turn.toolUses?.length ?? 0}
           </span>
         </div>
       </button>
