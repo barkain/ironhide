@@ -10,6 +10,7 @@ import {
   ResponsiveContainer,
   Legend,
   Brush,
+  ReferenceLine,
 } from 'recharts';
 import { ChartCard } from './ChartCard';
 import { formatNumber } from '@/lib/utils';
@@ -22,7 +23,7 @@ interface CodeChangesChartProps {
 interface ChartDataPoint {
   turn: number;
   added: number;
-  removed: number;
+  removed: number; // Negative value for display below zero
   net: number;
   filesCreated: number;
   filesModified: number;
@@ -58,9 +59,11 @@ function CodeChangesBarChart({
         />
         <YAxis
           className="text-xs"
-          domain={[0, 'auto']}
-          tickFormatter={(value) => formatNumber(value)}
+          domain={['auto', 'auto']}
+          tickFormatter={(value) => formatNumber(Math.abs(value))}
         />
+        {/* Reference line at zero */}
+        <ReferenceLine y={0} stroke="hsl(var(--border))" />
         <Tooltip
           contentStyle={{
             backgroundColor: 'hsl(var(--card))',
@@ -68,7 +71,8 @@ function CodeChangesBarChart({
             borderRadius: 'var(--radius)',
           }}
           formatter={(value: number, name: string) => {
-            return [formatNumber(value), name];
+            // Show absolute value for removed lines
+            return [formatNumber(Math.abs(value)), name];
           }}
           labelFormatter={(label) => `Turn ${label}`}
         />
@@ -117,7 +121,7 @@ export function CodeChangesChart({ data }: CodeChangesChartProps) {
     return {
       turn: metric.turnNumber,
       added: codeMetrics.linesAdded ?? 0,
-      removed: codeMetrics.linesRemoved ?? 0, // Keep as positive value
+      removed: -(codeMetrics.linesRemoved ?? 0), // Negative to show below zero
       net: codeMetrics.netLinesChanged ?? 0,
       filesCreated: codeMetrics.filesCreated ?? 0,
       filesModified: codeMetrics.filesModified ?? 0,

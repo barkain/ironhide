@@ -46,6 +46,12 @@ function CostLineChart({
   const brushStartIndex = isExpanded ? 0 : Math.max(0, dataLength - defaultVisiblePoints);
   const brushEndIndex = Math.max(0, dataLength - 1);
 
+  // Calculate max for domain - ensure chart has reasonable scale even if all values are 0
+  const maxValue = Math.max(
+    ...chartData.map(d => Math.max(d.total, d.input, d.output, d.cacheCreation)),
+    0.01 // Minimum of $0.01 to prevent empty chart
+  );
+
   return (
     <ResponsiveContainer width="100%" height="100%">
       <LineChart
@@ -61,6 +67,7 @@ function CostLineChart({
         <YAxis
           className="text-xs"
           tickFormatter={(value) => `$${value.toFixed(2)}`}
+          domain={[0, maxValue]}
         />
         <Tooltip
           contentStyle={{
@@ -81,6 +88,8 @@ function CostLineChart({
               strokeWidth={2}
               dot={false}
               name="Input Cost"
+              connectNulls
+              isAnimationActive={false}
             />
             <Line
               type="monotone"
@@ -89,6 +98,8 @@ function CostLineChart({
               strokeWidth={2}
               dot={false}
               name="Output Cost"
+              connectNulls
+              isAnimationActive={false}
             />
             <Line
               type="monotone"
@@ -97,6 +108,8 @@ function CostLineChart({
               strokeWidth={2}
               dot={false}
               name="Cache Creation"
+              connectNulls
+              isAnimationActive={false}
             />
           </>
         ) : (
@@ -107,6 +120,8 @@ function CostLineChart({
             strokeWidth={2}
             dot={false}
             name="Total Cost"
+            connectNulls
+            isAnimationActive={false}
           />
         )}
         {showBrush && dataLength > 10 && (

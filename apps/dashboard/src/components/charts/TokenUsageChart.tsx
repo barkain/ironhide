@@ -46,6 +46,12 @@ function TokenUsageLineChart({
   const brushStartIndex = isExpanded ? 0 : Math.max(0, dataLength - defaultVisiblePoints);
   const brushEndIndex = Math.max(0, dataLength - 1);
 
+  // Calculate max for domain - ensure chart has reasonable scale even if all values are 0
+  const maxValue = Math.max(
+    ...chartData.map(d => Math.max(d.total, d.input, d.output, d.cacheRead)),
+    1 // Minimum of 1 to prevent empty chart
+  );
+
   return (
     <ResponsiveContainer width="100%" height="100%">
       <LineChart
@@ -61,6 +67,7 @@ function TokenUsageLineChart({
         <YAxis
           className="text-xs"
           tickFormatter={(value) => formatNumber(value)}
+          domain={[0, maxValue]}
         />
         <Tooltip
           contentStyle={{
@@ -81,6 +88,8 @@ function TokenUsageLineChart({
               strokeWidth={2}
               dot={false}
               name="Input"
+              connectNulls
+              isAnimationActive={false}
             />
             <Line
               type="monotone"
@@ -89,6 +98,8 @@ function TokenUsageLineChart({
               strokeWidth={2}
               dot={false}
               name="Output"
+              connectNulls
+              isAnimationActive={false}
             />
             <Line
               type="monotone"
@@ -97,6 +108,8 @@ function TokenUsageLineChart({
               strokeWidth={2}
               dot={false}
               name="Cache Read"
+              connectNulls
+              isAnimationActive={false}
             />
           </>
         ) : (
@@ -107,6 +120,8 @@ function TokenUsageLineChart({
             strokeWidth={2}
             dot={false}
             name="Total Tokens"
+            connectNulls
+            isAnimationActive={false}
           />
         )}
         {showBrush && dataLength > 10 && (
