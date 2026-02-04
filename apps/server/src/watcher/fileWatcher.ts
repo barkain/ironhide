@@ -62,7 +62,7 @@ class FileWatcher {
 
     this.watcher = chokidar.watch(watchPath, {
       persistent: true,
-      ignoreInitial: false, // Process existing files on start
+      ignoreInitial: false, // Process existing files on startup
       awaitWriteFinish: {
         stabilityThreshold: SERVER_CONFIG.watcherDebounceMs,
         pollInterval: 50,
@@ -88,7 +88,7 @@ class FileWatcher {
       })
       .on('error', (error) => this.handleError(error))
       .on('ready', () => {
-        console.log(`File watcher ready. Found ${filesFound} JSONL files on initial scan.`);
+        console.log(`File watcher ready. Processing ${filesFound} JSONL files from initial scan.`);
         this.isWatching = true;
       });
   }
