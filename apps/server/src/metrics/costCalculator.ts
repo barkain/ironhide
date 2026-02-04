@@ -10,6 +10,12 @@ import {
 
 /**
  * Calculate cost for a turn's token usage
+ *
+ * Returns all 4 cost components:
+ * - input: Standard input tokens
+ * - output: Output tokens
+ * - cacheCreation: Cache write/creation tokens
+ * - cacheRead: Cache read tokens (10% of input price)
  */
 export function calculateTurnCost(usage: TokenUsage, model: string): CostMetrics {
   const breakdown = calculateTokenCost(usage, model);
@@ -18,6 +24,7 @@ export function calculateTurnCost(usage: TokenUsage, model: string): CostMetrics
     input: breakdown.input,
     output: breakdown.output,
     cacheCreation: breakdown.cacheCreation,
+    cacheRead: breakdown.cacheRead,
     total: breakdown.total,
   };
 }
@@ -31,15 +38,17 @@ export function aggregateCostMetrics(costs: CostMetrics[]): CostMetrics {
       input: acc.input + cost.input,
       output: acc.output + cost.output,
       cacheCreation: acc.cacheCreation + cost.cacheCreation,
+      cacheRead: acc.cacheRead + cost.cacheRead,
       total: acc.total + cost.total,
     }),
-    { input: 0, output: 0, cacheCreation: 0, total: 0 }
+    { input: 0, output: 0, cacheCreation: 0, cacheRead: 0, total: 0 }
   );
 
   return {
     input: roundCost(total.input),
     output: roundCost(total.output),
     cacheCreation: roundCost(total.cacheCreation),
+    cacheRead: roundCost(total.cacheRead),
     total: roundCost(total.total),
   };
 }
@@ -57,7 +66,10 @@ export function getCostBreakdownSummary(cost: CostMetrics): string {
     parts.push(`Output: $${formatCostValue(cost.output)}`);
   }
   if (cost.cacheCreation > 0) {
-    parts.push(`Cache: $${formatCostValue(cost.cacheCreation)}`);
+    parts.push(`Cache Write: $${formatCostValue(cost.cacheCreation)}`);
+  }
+  if (cost.cacheRead > 0) {
+    parts.push(`Cache Read: $${formatCostValue(cost.cacheRead)}`);
   }
 
   return parts.join(', ') || 'No cost';

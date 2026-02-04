@@ -17,11 +17,18 @@ export const TokenMetricsSchema = z.object({
 
 /**
  * Cost metrics schema
+ *
+ * Includes all 4 cost components as per Claude API pricing:
+ * - input: Standard input tokens
+ * - output: Output tokens
+ * - cacheCreation: Cache write tokens
+ * - cacheRead: Cache read tokens (10% of input price)
  */
 export const CostMetricsSchema = z.object({
   input: z.number().nonnegative(),
   output: z.number().nonnegative(),
   cacheCreation: z.number().nonnegative(),
+  cacheRead: z.number().nonnegative(),
   total: z.number().nonnegative(),
 });
 
@@ -82,6 +89,7 @@ export const SessionMetricsSchema = z.object({
     input: z.number().nonnegative(),
     output: z.number().nonnegative(),
     cacheCreation: z.number().nonnegative(),
+    cacheRead: z.number().nonnegative(),
   }),
   averages: z.object({
     tokensPerTurn: z.number().nonnegative(),
@@ -245,6 +253,7 @@ export function createEmptyCostMetrics(): CostMetricsOutput {
     input: 0,
     output: 0,
     cacheCreation: 0,
+    cacheRead: 0,
     total: 0,
   };
 }

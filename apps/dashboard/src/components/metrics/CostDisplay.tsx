@@ -10,6 +10,7 @@ interface CostDisplayProps {
     input: number;
     output: number;
     cacheCreation: number;
+    cacheRead: number;
   };
   avgCostPerTurn?: number;
   showBreakdown?: boolean;
@@ -51,6 +52,10 @@ export function CostDisplay({
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Cache creation</span>
               <span>{formatCurrency(costBreakdown.cacheCreation)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Cache read</span>
+              <span>{formatCurrency(costBreakdown.cacheRead)}</span>
             </div>
           </div>
         )}

@@ -15,11 +15,18 @@ export interface TokenMetrics {
 
 /**
  * Cost metrics breakdown
+ *
+ * Includes all 4 cost components as per Claude API pricing:
+ * - input: Standard input tokens ($5.00/M for Opus 4.5)
+ * - output: Output tokens ($25.00/M for Opus 4.5)
+ * - cacheCreation: Cache write tokens ($6.25/M for Opus 4.5)
+ * - cacheRead: Cache read tokens ($0.50/M for Opus 4.5)
  */
 export interface CostMetrics {
   input: number;
   output: number;
   cacheCreation: number;
+  cacheRead: number;
   total: number;
 }
 
@@ -89,11 +96,12 @@ export interface SessionMetrics {
   /** Total cost in USD */
   totalCost: number;
 
-  /** Cost breakdown by category */
+  /** Cost breakdown by category (all 4 components) */
   costBreakdown: {
     input: number;
     output: number;
     cacheCreation: number;
+    cacheRead: number;
   };
 
   /** Average metrics per turn */

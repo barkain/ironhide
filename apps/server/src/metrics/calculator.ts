@@ -105,11 +105,12 @@ export function calculateSessionMetrics(
   const costs = turnMetrics.map((m) => m.cost);
   const totalCostMetrics = aggregateCostMetrics(costs);
 
-  // Calculate cost breakdown
+  // Calculate cost breakdown (all 4 components)
   const costBreakdown = {
     input: totalCostMetrics.input,
     output: totalCostMetrics.output,
     cacheCreation: totalCostMetrics.cacheCreation,
+    cacheRead: totalCostMetrics.cacheRead,
   };
 
   // Aggregate code changes
@@ -210,7 +211,7 @@ function createEmptySessionMetrics(sessionId: string): SessionMetrics {
     totalDurationMs: 0,
     totalTokens: createEmptyTokenMetrics(),
     totalCost: 0,
-    costBreakdown: { input: 0, output: 0, cacheCreation: 0 },
+    costBreakdown: { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 },
     averages: {
       tokensPerTurn: 0,
       costPerTurn: 0,
