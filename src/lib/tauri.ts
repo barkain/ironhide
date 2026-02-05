@@ -44,110 +44,46 @@ export async function scanNewSessions(knownIds: string[]): Promise<SessionSummar
   return invoke('scan_new_sessions', { knownIds });
 }
 
+/** Preload all sessions into cache at startup - call this once when app starts */
+export async function preloadAllSessions(): Promise<number> {
+  return invoke('preload_all_sessions');
+}
+
+/** Get sessions filtered by date range (uses cached data for efficiency) */
+export async function getSessionsFiltered(
+  startDate?: string,
+  endDate?: string,
+  limit = 100,
+  offset = 0
+): Promise<SessionSummary[]> {
+  return invoke('get_sessions_filtered', {
+    startDate: startDate ?? null,
+    endDate: endDate ?? null,
+    limit,
+    offset,
+  });
+}
+
 // ============================================================================
 // Dashboard/Aggregate Commands
 // ============================================================================
 
-/** Get dashboard summary metrics (computed from session data) */
+/** Get dashboard summary metrics (using efficient backend command) */
 export async function getDashboardSummary(_dateRange?: DateRange): Promise<DashboardSummary> {
-  // Since the backend doesn't have a dedicated dashboard summary command,
-  // we compute it from sessions data
-  const sessions = await getSessions(1000, 0);
-
-  const uniqueProjects = new Set(sessions.map(s => s.project_path));
-
-  const totalCost = sessions.reduce((sum, s) => sum + s.total_cost, 0);
-  const totalTurns = sessions.reduce((sum, s) => sum + s.total_turns, 0);
-  const totalTokens = sessions.reduce((sum, s) => sum + s.total_tokens, 0);
-
-  return {
-    total_sessions: sessions.length,
-    total_cost: totalCost,
-    total_turns: totalTurns,
-    total_tokens: totalTokens,
-    avg_cost_per_session: sessions.length > 0 ? totalCost / sessions.length : 0,
-    avg_turns_per_session: sessions.length > 0 ? totalTurns / sessions.length : 0,
-    avg_efficiency_score: null, // Computed from individual sessions
-    active_projects: uniqueProjects.size,
-  };
+  // Use the efficient backend command that limits processing
+  return invoke('get_dashboard_summary', { limit: 100 });
 }
 
-/** Get daily metrics for charts */
+/** Get daily metrics for charts (using efficient backend command) */
 export async function getDailyMetrics(_dateRange?: DateRange): Promise<DailyMetrics[]> {
-  // Compute daily metrics from sessions
-  const sessions = await getSessions(1000, 0);
-
-  // Group sessions by date
-  const byDate = new Map<string, SessionSummary[]>();
-
-  for (const session of sessions) {
-    const date = session.started_at.split('T')[0];
-    if (!byDate.has(date)) {
-      byDate.set(date, []);
-    }
-    byDate.get(date)!.push(session);
-  }
-
-  // Convert to daily metrics
-  const dailyMetrics: DailyMetrics[] = [];
-
-  for (const [date, daySessions] of byDate.entries()) {
-    dailyMetrics.push({
-      date,
-      session_count: daySessions.length,
-      total_turns: daySessions.reduce((sum, s) => sum + s.total_turns, 0),
-      total_cost: daySessions.reduce((sum, s) => sum + s.total_cost, 0),
-      total_tokens: daySessions.reduce((sum, s) => sum + s.total_tokens, 0),
-      avg_efficiency_score: null,
-    });
-  }
-
-  // Sort by date descending
-  dailyMetrics.sort((a, b) => b.date.localeCompare(a.date));
-
-  return dailyMetrics;
+  // Use the efficient backend command
+  return invoke('get_daily_metrics', { days: 30 });
 }
 
-/** Get project-level metrics */
+/** Get project-level metrics (using efficient backend command) */
 export async function getProjectMetrics(): Promise<ProjectMetrics[]> {
-  const sessions = await getSessions(1000, 0);
-
-  // Group by project
-  const byProject = new Map<string, SessionSummary[]>();
-
-  for (const session of sessions) {
-    const path = session.project_path;
-    if (!byProject.has(path)) {
-      byProject.set(path, []);
-    }
-    byProject.get(path)!.push(session);
-  }
-
-  // Convert to project metrics
-  const projectMetrics: ProjectMetrics[] = [];
-
-  for (const [path, projectSessions] of byProject.entries()) {
-    const totalCost = projectSessions.reduce((sum, s) => sum + s.total_cost, 0);
-    const lastActivity = projectSessions.reduce((latest, s) => {
-      return s.started_at > latest ? s.started_at : latest;
-    }, projectSessions[0].started_at);
-
-    projectMetrics.push({
-      project_path: path,
-      project_name: projectSessions[0].project_name,
-      session_count: projectSessions.length,
-      total_cost: totalCost,
-      total_turns: projectSessions.reduce((sum, s) => sum + s.total_turns, 0),
-      total_tokens: projectSessions.reduce((sum, s) => sum + s.total_tokens, 0),
-      avg_cost_per_session: projectSessions.length > 0 ? totalCost / projectSessions.length : 0,
-      last_activity: lastActivity,
-    });
-  }
-
-  // Sort by total cost descending
-  projectMetrics.sort((a, b) => b.total_cost - a.total_cost);
-
-  return projectMetrics;
+  // Use the efficient backend command
+  return invoke('get_project_metrics', { limit: 20 });
 }
 
 // ============================================================================
@@ -208,17 +144,14 @@ export async function updateSettings(settings: Partial<AppSettings>): Promise<vo
 
 /** @deprecated Use getSession instead */
 export async function getSessionsByProject(projectPath: string): Promise<SessionSummary[]> {
-  const sessions = await getSessions(1000, 0);
+  // Limit to 100 sessions for performance
+  const sessions = await getSessions(100, 0);
   return sessions.filter(s => s.project_path === projectPath);
 }
 
-/** @deprecated Use getSessions with date filtering instead */
+/** @deprecated Use getSessionsFiltered instead for efficient backend filtering */
 export async function getSessionsByDateRange(dateRange: DateRange): Promise<SessionSummary[]> {
-  const sessions = await getSessions(1000, 0);
-  return sessions.filter(s => {
-    const date = s.started_at.split('T')[0];
-    return date >= dateRange.start && date <= dateRange.end;
-  });
+  return getSessionsFiltered(dateRange.start, dateRange.end);
 }
 
 /** @deprecated No longer needed */
@@ -228,7 +161,8 @@ export async function getLastSyncTime(): Promise<string | null> {
 
 /** @deprecated Use getProjectMetrics instead */
 export async function getModelMetrics(): Promise<{ model: string; usage_count: number; total_cost: number }[]> {
-  const sessions = await getSessions(1000, 0);
+  // Limit to 100 sessions for performance
+  const sessions = await getSessions(100, 0);
 
   const byModel = new Map<string, { count: number; cost: number }>();
 
@@ -431,7 +365,8 @@ async function computeTrendsFromSessions(
   startDate?: string,
   endDate?: string
 ): Promise<DailyTrend[]> {
-  const sessions = await getSessions(1000, 0);
+  // Limit to 100 sessions for fallback to avoid slow loads
+  const sessions = await getSessions(100, 0);
 
   // Filter by date range
   const filteredSessions = sessions.filter((s) => {
@@ -473,7 +408,8 @@ async function computeCostTrendFromSessions(days: number): Promise<CostTrendPoin
     .toISOString()
     .split('T')[0];
 
-  const sessions = await getSessions(1000, 0);
+  // Limit to 100 sessions for fallback to avoid slow loads
+  const sessions = await getSessions(100, 0);
   const filteredSessions = sessions.filter((s) => {
     const date = s.started_at.split('T')[0];
     return date >= startDate;
@@ -503,7 +439,8 @@ async function computeEfficiencyTrendFromSessions(days: number): Promise<Efficie
     .toISOString()
     .split('T')[0];
 
-  const sessions = await getSessions(1000, 0);
+  // Limit to 100 sessions for fallback to avoid slow loads
+  const sessions = await getSessions(100, 0);
   const filteredSessions = sessions.filter((s) => {
     const date = s.started_at.split('T')[0];
     return date >= startDate;

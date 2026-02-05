@@ -93,6 +93,8 @@ pub fn run() {
             commands::get_session,
             commands::get_session_metrics,
             commands::get_session_count,
+            commands::get_sessions_filtered,
+            commands::preload_all_sessions,
             // Turn commands
             commands::get_turns,
             // Subagent commands
@@ -101,6 +103,10 @@ pub fn run() {
             commands::compare_sessions,
             // Code changes commands
             commands::get_session_code_changes,
+            // Dashboard summary commands (efficient aggregation)
+            commands::get_dashboard_summary,
+            commands::get_daily_metrics,
+            commands::get_project_metrics,
             // Trend commands
             commands::get_trends,
             commands::get_cost_trend,

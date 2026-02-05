@@ -17,6 +17,7 @@ interface EfficiencyRadarChartProps {
 
 interface RadarDataPoint {
   metric: string;
+  fullMetric: string;
   value: number;
   fullMark: number;
   rawValue: number;
@@ -61,28 +62,32 @@ function prepareRadarData(efficiency: EfficiencyMetrics): RadarDataPoint[] {
 
   return [
     {
-      metric: 'Cost Efficiency',
+      metric: 'Cost',
+      fullMetric: 'Cost Efficiency',
       value: costEfficiency,
       fullMark: 1,
       rawValue: efficiency.cpdu,
       rawLabel: `CPDU: $${efficiency.cpdu.toFixed(4)}`,
     },
     {
-      metric: 'Time Efficiency',
+      metric: 'Time',
+      fullMetric: 'Time Efficiency',
       value: timeEfficiency,
       fullMark: 1,
       rawValue: efficiency.cpd,
       rawLabel: `CpD: ${efficiency.cpd.toFixed(2)}`,
     },
     {
-      metric: 'Cache Efficiency',
+      metric: 'Cache',
+      fullMetric: 'Cache Efficiency',
       value: cacheEfficiency,
       fullMark: 1,
       rawValue: efficiency.cer,
       rawLabel: `CER: ${(efficiency.cer * 100).toFixed(1)}%`,
     },
     {
-      metric: 'Subagent Efficiency',
+      metric: 'Subagent',
+      fullMetric: 'Subagent Efficiency',
       value: subagentEfficiency,
       fullMark: 1,
       rawValue: efficiency.sei ?? 0,
@@ -91,7 +96,8 @@ function prepareRadarData(efficiency: EfficiencyMetrics): RadarDataPoint[] {
         : 'SEI: N/A (no subagents)',
     },
     {
-      metric: 'Workflow Smoothness',
+      metric: 'Workflow',
+      fullMetric: 'Workflow Smoothness',
       value: workflowSmoothness,
       fullMark: 1,
       rawValue: efficiency.wfs,
@@ -124,7 +130,7 @@ function CustomTooltip({ active, payload }: CustomTooltipProps) {
       }}
     >
       <p style={{ color: '#fff', fontWeight: 600, marginBottom: 4 }}>
-        {data.metric}
+        {data.fullMetric}
       </p>
       <p style={{ color: '#9ca3af', fontSize: 14 }}>
         Score: {(data.value * 100).toFixed(1)}%

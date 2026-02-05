@@ -235,7 +235,7 @@ import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Badge } from '../components/ui/Badge';
-import { cn, formatCurrency, formatCompactNumber, formatDateTime, formatDuration, formatNumber } from '../lib/utils';
+import { cn, formatCurrency, formatCompactNumber, formatDateTime, formatDuration, formatNumber, cleanMessageContent } from '../lib/utils';
 import {
   ChevronDown,
   ChevronRight,
@@ -626,6 +626,9 @@ interface MarkdownContentProps {
 }
 
 function MarkdownContent({ content }: MarkdownContentProps) {
+  // Clean up XML tags and notification content before rendering
+  const cleanedContent = cleanMessageContent(content);
+
   return (
     <div className="prose prose-invert prose-sm max-w-none">
       <ReactMarkdown
@@ -722,7 +725,7 @@ function MarkdownContent({ content }: MarkdownContentProps) {
           },
         }}
       >
-        {content}
+        {cleanedContent}
       </ReactMarkdown>
     </div>
   );

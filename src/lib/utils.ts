@@ -1,7 +1,36 @@
 import { clsx, type ClassValue } from 'clsx';
+import { format, parseISO } from 'date-fns';
 
 export function cn(...inputs: ClassValue[]) {
   return clsx(inputs);
+}
+
+/**
+ * Strip XML tags and clean up message content for display
+ * Handles Claude Code notification tags like <task-notification>, etc.
+ */
+export function cleanMessageContent(message: string | null | undefined): string {
+  if (!message) return '';
+
+  // Remove XML tags completely
+  let cleaned = message.replace(/<[^>]+>/g, '');
+
+  // Remove common notification content patterns
+  cleaned = cleaned.replace(/^\s*(summary|details|status|Agent\s+"[^"]+"\s+completed)\s*:?\s*/gmi, '');
+
+  // Collapse multiple whitespace/newlines into single space
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+
+  return cleaned;
+}
+
+/**
+ * Get a short preview of a message, cleaned and truncated
+ */
+export function getMessagePreview(message: string | null | undefined, maxLength: number = 100): string {
+  const cleaned = cleanMessageContent(message);
+  if (cleaned.length <= maxLength) return cleaned;
+  return cleaned.slice(0, maxLength).trim() + '...';
 }
 
 export function formatCurrency(value: number): string {
@@ -25,23 +54,55 @@ export function formatCompactNumber(value: number): string {
 }
 
 export function formatDate(dateString: string): string {
-  const date = new Date(dateString);
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  }).format(date);
+  // Handle YYYYMMDD format (e.g., "20251101")
+  if (/^\d{8}$/.test(dateString)) {
+    const year = dateString.slice(0, 4);
+    const month = dateString.slice(4, 6);
+    const day = dateString.slice(6, 8);
+    const date = new Date(`${year}-${month}-${day}`);
+    return format(date, 'MMM d, yyyy');
+  }
+
+  // Handle ISO format
+  try {
+    const date = parseISO(dateString);
+    return format(date, 'MMM d, yyyy');
+  } catch {
+    // Fallback to Intl
+    const date = new Date(dateString);
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(date);
+  }
 }
 
 export function formatDateTime(dateString: string): string {
-  const date = new Date(dateString);
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date);
+  // Handle YYYYMMDD format (e.g., "20251101")
+  if (/^\d{8}$/.test(dateString)) {
+    const year = dateString.slice(0, 4);
+    const month = dateString.slice(4, 6);
+    const day = dateString.slice(6, 8);
+    const date = new Date(`${year}-${month}-${day}`);
+    return format(date, 'MMM d, yyyy');
+  }
+
+  // Handle ISO format
+  try {
+    const date = parseISO(dateString);
+    return format(date, 'MMM d, yyyy, h:mm a');
+  } catch {
+    // Fallback to Intl
+    const date = new Date(dateString);
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(date);
+  }
 }
 
 export function formatRelativeTime(dateString: string): string {

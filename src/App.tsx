@@ -1,8 +1,9 @@
-import React, { Suspense } from 'react';
+import React, { Suspense, useEffect } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout } from './components/layout/Layout';
 import { PageLoadingSpinner } from './components/ui/PageLoadingSpinner';
+import { preloadAllSessions } from './lib/tauri';
 
 // Lazy load all page components for code splitting
 const Dashboard = React.lazy(() => import('./pages/Dashboard'));
@@ -17,12 +18,33 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 1000 * 60 * 5, // 5 minutes
+      gcTime: 1000 * 60 * 30, // 30 minutes cache retention
       retry: 1,
     },
   },
 });
 
+// Preload sessions on app startup (outside component to run once)
+let preloadStarted = false;
+function startPreload() {
+  if (preloadStarted) return;
+  preloadStarted = true;
+
+  preloadAllSessions()
+    .then((count) => {
+      console.log(`Session preload complete: ${count} sessions cached`);
+    })
+    .catch((error) => {
+      console.warn('Session preload failed:', error);
+    });
+}
+
 function App() {
+  // Trigger preload on mount
+  useEffect(() => {
+    startPreload();
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>

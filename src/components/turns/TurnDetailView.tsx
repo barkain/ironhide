@@ -5,7 +5,7 @@ import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
-import { cn, formatCurrency, formatCompactNumber, formatDateTime, formatDuration, formatNumber } from '../../lib/utils';
+import { cn, formatCurrency, formatCompactNumber, formatDateTime, formatDuration, formatNumber, cleanMessageContent } from '../../lib/utils';
 import {
   X,
   ChevronDown,
@@ -417,6 +417,9 @@ interface MarkdownContentProps {
 }
 
 function MarkdownContent({ content }: MarkdownContentProps) {
+  // Clean up XML tags and notification content before rendering
+  const cleanedContent = cleanMessageContent(content);
+
   return (
     <div className="prose prose-invert prose-sm max-w-none">
       <ReactMarkdown
@@ -513,7 +516,7 @@ function MarkdownContent({ content }: MarkdownContentProps) {
           },
         }}
       >
-        {content}
+        {cleanedContent}
       </ReactMarkdown>
     </div>
   );

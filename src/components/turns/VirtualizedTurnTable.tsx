@@ -1,8 +1,8 @@
-import { useRef, useCallback, useState } from 'react';
+import { useRef, useCallback, useState, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Badge } from '../ui/Badge';
-import { cn, formatCurrency, formatCompactNumber, formatDateTime, formatDuration } from '../../lib/utils';
-import { Bot, Wrench, ChevronDown, ChevronUp, Clock, Zap, DollarSign } from 'lucide-react';
+import { cn, formatCurrency, formatCompactNumber, formatDateTime, formatDuration, cleanMessageContent } from '../../lib/utils';
+import { Bot, Wrench, ChevronDown, ChevronUp, Clock, Zap, DollarSign, Search, SortAsc, SortDesc, Filter } from 'lucide-react';
 import type { TurnSummary } from '../../types';
 
 interface VirtualizedTurnTableProps {
@@ -15,16 +15,90 @@ interface VirtualizedTurnTableProps {
 const ROW_HEIGHT_COLLAPSED = 72; // Base height for collapsed rows
 const ROW_HEIGHT_EXPANDED_BASE = 200; // Base height for expanded rows
 const HEADER_HEIGHT = 48;
+const CONTROLS_HEIGHT = 56;
+
+type SortField = 'turn' | 'cost' | 'input' | 'output' | 'duration';
+type SortDirection = 'asc' | 'desc';
 
 export function VirtualizedTurnTable({ turns, onTurnClick, className }: VirtualizedTurnTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const [expandedTurns, setExpandedTurns] = useState<Set<number>>(new Set());
 
+  // Filter and sort state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortField, setSortField] = useState<SortField>('turn');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [minCost, setMinCost] = useState<string>('');
+  const [hasToolsOnly, setHasToolsOnly] = useState(false);
+
+  // Filter and sort turns
+  const filteredTurns = useMemo(() => {
+    let result = [...turns];
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      result = result.filter((turn) => {
+        const userMsg = turn.user_message?.toLowerCase() || '';
+        const assistantMsg = turn.assistant_message?.toLowerCase() || '';
+        const tools = turn.tools_used.join(' ').toLowerCase();
+        return userMsg.includes(query) || assistantMsg.includes(query) || tools.includes(query);
+      });
+    }
+
+    // Apply min cost filter
+    if (minCost) {
+      const minCostValue = parseFloat(minCost);
+      if (!isNaN(minCostValue)) {
+        result = result.filter((turn) => turn.cost >= minCostValue);
+      }
+    }
+
+    // Apply has tools filter
+    if (hasToolsOnly) {
+      result = result.filter((turn) => turn.tool_count > 0);
+    }
+
+    // Apply sorting
+    result.sort((a, b) => {
+      let comparison = 0;
+      switch (sortField) {
+        case 'turn':
+          comparison = a.turn_number - b.turn_number;
+          break;
+        case 'cost':
+          comparison = a.cost - b.cost;
+          break;
+        case 'input':
+          comparison = a.tokens.input - b.tokens.input;
+          break;
+        case 'output':
+          comparison = a.tokens.output - b.tokens.output;
+          break;
+        case 'duration':
+          comparison = (a.duration_ms ?? 0) - (b.duration_ms ?? 0);
+          break;
+      }
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+
+    return result;
+  }, [turns, searchQuery, sortField, sortDirection, minCost, hasToolsOnly]);
+
+  const handleSort = useCallback((field: SortField) => {
+    if (sortField === field) {
+      setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDirection(field === 'turn' ? 'asc' : 'desc');
+    }
+  }, [sortField]);
+
   // Calculate row height based on expanded state and content
   const getRowHeight = useCallback(
     (index: number) => {
-      const turn = turns[index];
-      if (!expandedTurns.has(turn.turn_number)) {
+      const turn = filteredTurns[index];
+      if (!turn || !expandedTurns.has(turn.turn_number)) {
         return ROW_HEIGHT_COLLAPSED;
       }
       // Estimate expanded height based on content
@@ -34,11 +108,11 @@ export function VirtualizedTurnTable({ turns, onTurnClick, className }: Virtuali
       if (turn.assistant_message) height += Math.min(240, Math.ceil(turn.assistant_message.length / 100) * 20 + 40);
       return height;
     },
-    [turns, expandedTurns]
+    [filteredTurns, expandedTurns]
   );
 
   const virtualizer = useVirtualizer({
-    count: turns.length,
+    count: filteredTurns.length,
     getScrollElement: () => parentRef.current,
     estimateSize: getRowHeight,
     overscan: 5,
@@ -66,17 +140,112 @@ export function VirtualizedTurnTable({ turns, onTurnClick, className }: Virtuali
 
   return (
     <div className={cn('flex flex-col', className)}>
+      {/* Filter and Sort Controls */}
+      <div
+        className="sticky top-0 z-20 flex flex-wrap items-center gap-3 bg-[var(--color-surface)] px-4 py-3 border-b border-gray-700"
+        style={{ height: CONTROLS_HEIGHT }}
+      >
+        {/* Search */}
+        <div className="relative flex-1 min-w-[200px] max-w-xs">
+          <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search turns..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full rounded-md border border-gray-700 bg-[var(--color-background)] py-1.5 pl-8 pr-3 text-sm text-white placeholder-gray-500 focus:border-[var(--color-primary-500)] focus:outline-none"
+          />
+        </div>
+
+        {/* Sort dropdown */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-gray-400">Sort:</span>
+          <select
+            value={sortField}
+            onChange={(e) => setSortField(e.target.value as SortField)}
+            className="rounded-md border border-gray-700 bg-[var(--color-background)] px-2 py-1.5 text-sm text-white focus:border-[var(--color-primary-500)] focus:outline-none"
+          >
+            <option value="turn">Turn #</option>
+            <option value="cost">Cost</option>
+            <option value="input">Input Tokens</option>
+            <option value="output">Output Tokens</option>
+            <option value="duration">Duration</option>
+          </select>
+          <button
+            onClick={() => setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'))}
+            className="p-1.5 rounded-md border border-gray-700 bg-[var(--color-background)] text-gray-400 hover:text-white hover:border-gray-600 transition-colors"
+            title={sortDirection === 'asc' ? 'Ascending' : 'Descending'}
+          >
+            {sortDirection === 'asc' ? <SortAsc className="h-4 w-4" /> : <SortDesc className="h-4 w-4" />}
+          </button>
+        </div>
+
+        {/* Min cost filter */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-gray-400">Min $:</span>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            placeholder="0.00"
+            value={minCost}
+            onChange={(e) => setMinCost(e.target.value)}
+            className="w-20 rounded-md border border-gray-700 bg-[var(--color-background)] px-2 py-1.5 text-sm text-white placeholder-gray-500 focus:border-[var(--color-primary-500)] focus:outline-none"
+          />
+        </div>
+
+        {/* Has tools filter */}
+        <label className="flex items-center gap-1.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={hasToolsOnly}
+            onChange={(e) => setHasToolsOnly(e.target.checked)}
+            className="rounded border-gray-700 bg-[var(--color-background)] text-[var(--color-primary-500)] focus:ring-[var(--color-primary-500)]"
+          />
+          <span className="text-xs text-gray-400">Has tools</span>
+        </label>
+
+        {/* Results count */}
+        <span className="text-xs text-gray-500 ml-auto">
+          {filteredTurns.length} of {turns.length} turns
+        </span>
+      </div>
+
       {/* Fixed Header */}
       <div
-        className="sticky top-0 z-10 grid grid-cols-[80px_1fr_120px_120px_120px_100px_40px] gap-4 bg-[var(--color-surface)] px-4 py-3 border-b border-gray-700 text-xs font-medium text-gray-400"
-        style={{ height: HEADER_HEIGHT }}
+        className="sticky z-10 grid grid-cols-[80px_1fr_120px_120px_120px_100px_40px] gap-4 bg-[var(--color-surface)] px-4 py-3 border-b border-gray-700 text-xs font-medium text-gray-400"
+        style={{ top: CONTROLS_HEIGHT, height: HEADER_HEIGHT }}
       >
-        <div>Turn</div>
+        <button
+          onClick={() => handleSort('turn')}
+          className={cn('text-left flex items-center gap-1', sortField === 'turn' && 'text-white')}
+        >
+          Turn
+          {sortField === 'turn' && (sortDirection === 'asc' ? <SortAsc className="h-3 w-3" /> : <SortDesc className="h-3 w-3" />)}
+        </button>
         <div>Details</div>
-        <div className="text-right">Input</div>
-        <div className="text-right">Output</div>
+        <button
+          onClick={() => handleSort('input')}
+          className={cn('text-right flex items-center justify-end gap-1', sortField === 'input' && 'text-white')}
+        >
+          Input
+          {sortField === 'input' && (sortDirection === 'asc' ? <SortAsc className="h-3 w-3" /> : <SortDesc className="h-3 w-3" />)}
+        </button>
+        <button
+          onClick={() => handleSort('output')}
+          className={cn('text-right flex items-center justify-end gap-1', sortField === 'output' && 'text-white')}
+        >
+          Output
+          {sortField === 'output' && (sortDirection === 'asc' ? <SortAsc className="h-3 w-3" /> : <SortDesc className="h-3 w-3" />)}
+        </button>
         <div className="text-right">Cache</div>
-        <div className="text-right">Cost</div>
+        <button
+          onClick={() => handleSort('cost')}
+          className={cn('text-right flex items-center justify-end gap-1', sortField === 'cost' && 'text-white')}
+        >
+          Cost
+          {sortField === 'cost' && (sortDirection === 'asc' ? <SortAsc className="h-3 w-3" /> : <SortDesc className="h-3 w-3" />)}
+        </button>
         <div />
       </div>
 
@@ -84,42 +253,59 @@ export function VirtualizedTurnTable({ turns, onTurnClick, className }: Virtuali
       <div
         ref={parentRef}
         className="flex-1 overflow-auto"
-        style={{ height: 'calc(100vh - 400px)', minHeight: '400px' }}
+        style={{ height: 'calc(100vh - 500px)', minHeight: '400px' }}
       >
-        <div
-          style={{
-            height: `${virtualizer.getTotalSize()}px`,
-            width: '100%',
-            position: 'relative',
-          }}
-        >
-          {virtualizer.getVirtualItems().map((virtualRow) => {
-            const turn = turns[virtualRow.index];
-            const isExpanded = expandedTurns.has(turn.turn_number);
+        {filteredTurns.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+            <Filter className="h-8 w-8 mb-2" />
+            <p>No turns match your filters</p>
+            <button
+              onClick={() => {
+                setSearchQuery('');
+                setMinCost('');
+                setHasToolsOnly(false);
+              }}
+              className="mt-2 text-sm text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]"
+            >
+              Clear filters
+            </button>
+          </div>
+        ) : (
+          <div
+            style={{
+              height: `${virtualizer.getTotalSize()}px`,
+              width: '100%',
+              position: 'relative',
+            }}
+          >
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const turn = filteredTurns[virtualRow.index];
+              const isExpanded = expandedTurns.has(turn.turn_number);
 
-            return (
-              <div
-                key={turn.turn_number}
-                className="absolute left-0 top-0 w-full"
-                style={{
-                  height: `${virtualRow.size}px`,
-                  transform: `translateY(${virtualRow.start}px)`,
-                }}
-              >
-                <TurnRow
-                  turn={turn}
-                  isExpanded={isExpanded}
-                  onClick={() => handleRowClick(turn)}
-                />
-              </div>
-            );
-          })}
-        </div>
+              return (
+                <div
+                  key={turn.turn_number}
+                  className="absolute left-0 top-0 w-full"
+                  style={{
+                    height: `${virtualRow.size}px`,
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                >
+                  <TurnRow
+                    turn={turn}
+                    isExpanded={isExpanded}
+                    onClick={() => handleRowClick(turn)}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Footer with count */}
       <div className="px-4 py-2 text-xs text-gray-500 border-t border-gray-700">
-        Showing {turns.length} turns (virtualized)
+        Showing {filteredTurns.length} of {turns.length} turns (virtualized)
       </div>
     </div>
   );
@@ -260,7 +446,7 @@ function TurnRow({ turn, isExpanded, onClick }: TurnRowProps) {
             <div>
               <p className="text-xs text-gray-400 mb-2">User Message</p>
               <div className="rounded bg-gray-800 p-3 text-sm text-gray-300 max-h-40 overflow-y-auto">
-                <pre className="whitespace-pre-wrap font-sans">{turn.user_message}</pre>
+                <pre className="whitespace-pre-wrap font-sans">{cleanMessageContent(turn.user_message)}</pre>
               </div>
             </div>
           )}
@@ -270,7 +456,7 @@ function TurnRow({ turn, isExpanded, onClick }: TurnRowProps) {
             <div>
               <p className="text-xs text-gray-400 mb-2">Assistant Response</p>
               <div className="rounded bg-gray-800 p-3 text-sm text-gray-300 max-h-60 overflow-y-auto">
-                <pre className="whitespace-pre-wrap font-sans">{turn.assistant_message}</pre>
+                <pre className="whitespace-pre-wrap font-sans">{cleanMessageContent(turn.assistant_message)}</pre>
               </div>
             </div>
           )}

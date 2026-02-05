@@ -13,6 +13,13 @@ import type {
 } from '../types';
 
 // ============================================================================
+// Cache Constants (matching useSessions.ts)
+// ============================================================================
+
+const METRICS_STALE_TIME = 5 * 60 * 1000; // 5 minutes
+const METRICS_GC_TIME = 30 * 60 * 1000; // 30 minutes
+
+// ============================================================================
 // Dashboard Metrics
 // ============================================================================
 
@@ -23,6 +30,8 @@ export function useDashboardSummary() {
   return useQuery<DashboardSummary>({
     queryKey: ['dashboardSummary', dateRange],
     queryFn: () => getDashboardSummary(dateRange || undefined),
+    staleTime: METRICS_STALE_TIME,
+    gcTime: METRICS_GC_TIME,
   });
 }
 
@@ -37,6 +46,8 @@ export function useDailyMetrics() {
   return useQuery<DailyMetrics[]>({
     queryKey: ['dailyMetrics', dateRange],
     queryFn: () => getDailyMetrics(dateRange || undefined),
+    staleTime: METRICS_STALE_TIME,
+    gcTime: METRICS_GC_TIME,
   });
 }
 
@@ -49,6 +60,8 @@ export function useProjectMetrics() {
   return useQuery<ProjectMetrics[]>({
     queryKey: ['projectMetrics'],
     queryFn: getProjectMetrics,
+    staleTime: METRICS_STALE_TIME,
+    gcTime: METRICS_GC_TIME,
   });
 }
 
