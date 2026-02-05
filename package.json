@@ -1,21 +1,54 @@
 {
-  "name": "claude-code-analytics-dashboard",
+  "name": "claude-analytics",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"],
+  "version": "0.2.0",
+  "description": "Claude Code Analytics Dashboard - Analyze Claude Code sessions with deep insights, metrics, and recommendations",
+  "author": "Claude Analytics Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YOUR_USERNAME/claude-code-analytics-dashboard"
+  },
+  "type": "module",
   "scripts": {
-    "dev": "bun run --filter '*' dev",
-    "dev:server": "bun run --cwd apps/server dev:http",
-    "dev:dashboard": "bun run --cwd apps/dashboard dev",
-    "build": "bun run --filter '@analytics/shared' build && bun run --filter '@analytics/dashboard' build && bun run --filter '@analytics/server' build",
-    "start": "bun run --cwd apps/server start:http",
-    "start:mcp": "bun run --cwd apps/server start:mcp",
-    "start:mcp-with-http": "bun run --cwd apps/server start:mcp-with-http",
-    "lint": "bun run --filter '*' lint",
-    "typecheck": "bun run --filter '*' typecheck",
-    "server": "bun run --cwd apps/server dev:http",
-    "dashboard": "bun run --cwd apps/dashboard dev"
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "tauri:build:debug": "tauri build --debug"
   },
   "devDependencies": {
-    "typescript": "^5.5.0"
+    "@tailwindcss/postcss": "^4.1.18",
+    "@tauri-apps/cli": "^2.10.0",
+    "@types/d3-sankey": "^0.12.5",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/react-router-dom": "^5.3.3",
+    "@vitejs/plugin-react": "^4.5.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.2.4"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.90.20",
+    "@tanstack/react-virtual": "^3.13.18",
+    "@tauri-apps/api": "^2.10.1",
+    "@types/react-syntax-highlighter": "^15.5.13",
+    "autoprefixer": "^10.4.24",
+    "clsx": "^2.1.1",
+    "d3-sankey": "^0.12.3",
+    "date-fns": "^4.1.0",
+    "lucide-react": "^0.563.0",
+    "postcss": "^8.5.6",
+    "react": "^19.0.0",
+    "react-day-picker": "^9.13.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.13.0",
+    "react-syntax-highlighter": "^16.1.0",
+    "recharts": "^3.7.0",
+    "tailwindcss": "^4.1.18",
+    "zustand": "^5.0.11"
   }
 }
