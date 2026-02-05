@@ -3,20 +3,20 @@ import {
   getDashboardSummary,
   getDailyMetrics,
   getProjectMetrics,
-  getModelMetrics,
-  getToolUsage,
   refreshData,
-  getLastSyncTime,
 } from '../lib/tauri';
 import { useAppStore } from '../lib/store';
 import type {
   DashboardSummary,
   DailyMetrics,
   ProjectMetrics,
-  ModelMetrics,
-  ToolUsage,
 } from '../types';
 
+// ============================================================================
+// Dashboard Metrics
+// ============================================================================
+
+/** Fetch dashboard summary metrics */
 export function useDashboardSummary() {
   const dateRange = useAppStore((state) => state.dateRange);
 
@@ -26,6 +26,11 @@ export function useDashboardSummary() {
   });
 }
 
+// ============================================================================
+// Time-Series Metrics
+// ============================================================================
+
+/** Fetch daily aggregated metrics for charts */
 export function useDailyMetrics() {
   const dateRange = useAppStore((state) => state.dateRange);
 
@@ -35,6 +40,11 @@ export function useDailyMetrics() {
   });
 }
 
+// ============================================================================
+// Project Metrics
+// ============================================================================
+
+/** Fetch project-level metrics */
 export function useProjectMetrics() {
   return useQuery<ProjectMetrics[]>({
     queryKey: ['projectMetrics'],
@@ -42,28 +52,11 @@ export function useProjectMetrics() {
   });
 }
 
-export function useModelMetrics() {
-  return useQuery<ModelMetrics[]>({
-    queryKey: ['modelMetrics'],
-    queryFn: getModelMetrics,
-  });
-}
+// ============================================================================
+// Data Refresh
+// ============================================================================
 
-export function useToolUsage() {
-  return useQuery<ToolUsage[]>({
-    queryKey: ['toolUsage'],
-    queryFn: getToolUsage,
-  });
-}
-
-export function useLastSyncTime() {
-  return useQuery<string | null>({
-    queryKey: ['lastSyncTime'],
-    queryFn: getLastSyncTime,
-    refetchInterval: 60000, // Refetch every minute
-  });
-}
-
+/** Mutation hook for refreshing data */
 export function useRefreshData() {
   const queryClient = useQueryClient();
   const setIsRefreshing = useAppStore((state) => state.setIsRefreshing);
@@ -85,6 +78,11 @@ export function useRefreshData() {
   });
 }
 
+// ============================================================================
+// Invalidation
+// ============================================================================
+
+/** Hook to invalidate all metric queries */
 export function useInvalidateMetrics() {
   const queryClient = useQueryClient();
 
@@ -92,7 +90,36 @@ export function useInvalidateMetrics() {
     queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
     queryClient.invalidateQueries({ queryKey: ['dailyMetrics'] });
     queryClient.invalidateQueries({ queryKey: ['projectMetrics'] });
-    queryClient.invalidateQueries({ queryKey: ['modelMetrics'] });
-    queryClient.invalidateQueries({ queryKey: ['toolUsage'] });
   };
+}
+
+// ============================================================================
+// Legacy Compatibility (will be removed)
+// ============================================================================
+
+/** @deprecated Use useProjectMetrics instead */
+export function useModelMetrics() {
+  return useQuery<{ model: string; usage_count: number; total_cost: number }[]>({
+    queryKey: ['modelMetrics'],
+    queryFn: async () => [],
+  });
+}
+
+/** @deprecated Not implemented in new backend */
+export function useToolUsage() {
+  return useQuery<{ tool_name: string; usage_count: number }[]>({
+    queryKey: ['toolUsage'],
+    queryFn: async () => [],
+  });
+}
+
+/** @deprecated Use store state instead */
+export function useLastSyncTime() {
+  const lastSyncTime = useAppStore((state) => state.lastSyncTime);
+
+  return useQuery<string | null>({
+    queryKey: ['lastSyncTime'],
+    queryFn: async () => lastSyncTime,
+    refetchInterval: 60000,
+  });
 }

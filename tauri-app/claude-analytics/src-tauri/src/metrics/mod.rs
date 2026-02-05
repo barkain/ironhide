@@ -4,10 +4,12 @@
 //! - Token aggregation
 //! - Cost calculations
 //! - Efficiency scoring (OES, CER, SEI)
+//! - Session-level metrics aggregation
 
 pub mod tokens;
 pub mod cost;
 pub mod efficiency;
+pub mod session;
 
 use thiserror::Error;
 

@@ -318,6 +318,7 @@ dependencies = [
  "chrono",
  "dirs 5.0.1",
  "glob",
+ "lazy_static",
  "notify",
  "rusqlite",
  "serde",

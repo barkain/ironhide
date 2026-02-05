@@ -6,6 +6,7 @@
 //! - SQLite database management
 //! - Metrics calculation
 //! - File system watching for live updates
+//! - Session caching for performance
 
 pub mod commands;
 pub mod db;
@@ -45,6 +46,9 @@ pub enum CommandError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+
+    #[error("Parser error: {0}")]
+    Parser(String),
 }
 
 // Implement serialization for Tauri
@@ -68,16 +72,72 @@ pub fn run() {
         .with_max_level(tracing::Level::INFO)
         .init();
 
+    tracing::info!("Starting Claude Code Analytics backend");
+    tracing::info!("Scanning for sessions in ~/.claude/projects/");
+
+    // Do initial session scan on startup
+    let session_count = parser::scan_claude_sessions().len();
+    tracing::info!("Found {} session files", session_count);
+
     tauri::Builder::default()
         .manage(AppState::default())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
+            // Session commands
             commands::get_sessions,
             commands::get_session,
-            commands::get_db_path,
             commands::get_session_metrics,
+            commands::get_session_count,
+            // Turn commands
             commands::get_turns,
+            // Utility commands
+            commands::get_db_path,
+            commands::refresh_sessions,
+            commands::scan_new_sessions,
         ])
+        .setup(|app| {
+            // Spawn background task to watch for new sessions
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                session_watcher_task(app_handle);
+            });
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Background task that periodically checks for new/updated sessions
+fn session_watcher_task(app_handle: tauri::AppHandle) {
+    use std::collections::HashSet;
+    use std::time::Duration;
+    use tauri::Emitter;
+
+    let mut known_sessions: HashSet<String> = HashSet::new();
+
+    // Initial population
+    for session in parser::scan_claude_sessions() {
+        known_sessions.insert(session.session_id);
+    }
+
+    loop {
+        // Check every 30 seconds
+        std::thread::sleep(Duration::from_secs(30));
+
+        let current_sessions = parser::scan_claude_sessions();
+        let mut new_sessions = Vec::new();
+
+        for session in &current_sessions {
+            if !known_sessions.contains(&session.session_id) {
+                tracing::info!("New session discovered: {}", session.session_id);
+                new_sessions.push(session.session_id.clone());
+                known_sessions.insert(session.session_id.clone());
+            }
+        }
+
+        // Emit event if new sessions found
+        if !new_sessions.is_empty() {
+            let _ = app_handle.emit("sessions-updated", &new_sessions);
+        }
+    }
 }

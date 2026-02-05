@@ -9,7 +9,7 @@ import {
   Cell,
 } from 'recharts';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
-import { formatCurrency, getProjectName } from '../../lib/utils';
+import { formatCurrency } from '../../lib/utils';
 import type { ProjectMetrics } from '../../types';
 
 interface CostChartProps {
@@ -33,12 +33,25 @@ export function CostChart({ data, isLoading }: CostChartProps) {
     );
   }
 
+  if (!data || data.length === 0) {
+    return (
+      <Card className="h-80">
+        <CardHeader>
+          <CardTitle>Cost by Project</CardTitle>
+        </CardHeader>
+        <CardContent className="flex h-56 items-center justify-center">
+          <div className="text-gray-500">No data available</div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   // Take top 6 projects by cost
   const chartData = data
     .sort((a, b) => b.total_cost - a.total_cost)
     .slice(0, 6)
     .map((d) => ({
-      name: getProjectName(d.project_path),
+      name: d.project_name,
       fullPath: d.project_path,
       cost: d.total_cost,
       sessions: d.session_count,
@@ -75,10 +88,20 @@ export function CostChart({ data, isLoading }: CostChartProps) {
                 borderRadius: '8px',
               }}
               labelStyle={{ color: '#fff' }}
-              formatter={(value, name) => [
-                value !== undefined ? formatCurrency(value as number) : '',
-                name === 'cost' ? 'Cost' : String(name),
-              ]}
+              formatter={(value, _name, props) => {
+                if (value === undefined) return ['', ''];
+                const formattedValue = formatCurrency(value as number);
+                const sessions = props.payload?.sessions;
+                return [
+                  <span key="value">
+                    {formattedValue}
+                    {sessions !== undefined && (
+                      <span className="text-gray-400 ml-2">({sessions} session{sessions !== 1 ? 's' : ''})</span>
+                    )}
+                  </span>,
+                  'Cost',
+                ];
+              }}
               labelFormatter={(label, payload) =>
                 payload?.[0]?.payload?.fullPath || label
               }

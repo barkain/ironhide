@@ -84,6 +84,11 @@ impl EfficiencyScore {
 
 /// Calculate Cache Efficiency Ratio
 /// CER = cache_read / (cache_read + cache_write)
+///
+/// From the efficiency framework documentation:
+/// - Excellent: CER > 0.7 (good context reuse)
+/// - Good: CER 0.5-0.7 (moderate reuse)
+/// - Poor: CER < 0.5 (context not being leveraged)
 pub fn calculate_cer(tokens: &SessionTokens) -> f64 {
     let total_cache = tokens.total_cache();
     if total_cache == 0 {
@@ -93,8 +98,34 @@ pub fn calculate_cer(tokens: &SessionTokens) -> f64 {
     tokens.total_cache_read as f64 / total_cache as f64
 }
 
+/// Calculate CER from raw values
+/// CER = cache_read / (cache_read + cache_write)
+pub fn calculate_cer_raw(cache_read: u64, cache_write: u64) -> f64 {
+    let total = cache_read + cache_write;
+    if total == 0 {
+        return 0.0;
+    }
+    cache_read as f64 / total as f64
+}
+
+/// Get CER rating
+pub fn cer_rating(cer: f64) -> &'static str {
+    if cer > 0.7 {
+        "Excellent"
+    } else if cer >= 0.5 {
+        "Good"
+    } else {
+        "Poor"
+    }
+}
+
 /// Calculate Context Growth Rate
 /// CGR = (final_context - initial_context) / cycles
+///
+/// From the efficiency framework documentation:
+/// - Sustainable: CGR < 1000 tokens/cycle
+/// - Acceptable: CGR 1000-2500 tokens/cycle
+/// - Warning: CGR > 2500 tokens/cycle (context bloat)
 pub fn calculate_cgr(initial_context: u64, final_context: u64, cycles: u32) -> f64 {
     if cycles == 0 {
         return 0.0;
@@ -104,14 +135,69 @@ pub fn calculate_cgr(initial_context: u64, final_context: u64, cycles: u32) -> f
     growth as f64 / cycles as f64
 }
 
+/// Calculate CGR from total context and turn count
+/// CGR = total_context / turn_count
+pub fn calculate_cgr_simple(context_tokens: u64, turn_count: u32) -> f64 {
+    if turn_count == 0 {
+        return 0.0;
+    }
+    context_tokens as f64 / turn_count as f64
+}
+
+/// Get CGR rating
+pub fn cgr_rating(cgr: f64) -> &'static str {
+    if cgr < 1000.0 {
+        "Sustainable"
+    } else if cgr <= 2500.0 {
+        "Acceptable"
+    } else {
+        "Warning"
+    }
+}
+
 /// Calculate Subagent Efficiency Index
 /// SEI = deliverable_units / subagent_count
+///
+/// From the efficiency framework documentation:
+/// - Excellent: SEI > 0.4 (subagents highly productive)
+/// - Good: SEI 0.2-0.4 (reasonable orchestration)
+/// - Poor: SEI < 0.2 (too many subagents per output)
 pub fn calculate_sei(deliverable_units: u32, subagent_count: u32) -> Option<f64> {
     if subagent_count == 0 {
         return None;
     }
 
     Some(deliverable_units as f64 / subagent_count as f64)
+}
+
+/// Calculate SEI from f64 values (for more precise DU measurements)
+pub fn calculate_sei_f64(deliverable_units: f64, subagent_count: u32) -> Option<f64> {
+    if subagent_count == 0 {
+        return None;
+    }
+    Some(deliverable_units / subagent_count as f64)
+}
+
+/// Calculate SEI based on cost (alternative formula)
+/// SEI = deliverable_units / (main_cost + subagent_cost)
+/// This measures output per dollar spent
+pub fn calculate_sei_cost(main_cost: f64, subagent_cost: f64, deliverable_units: f64) -> f64 {
+    let total_cost = main_cost + subagent_cost;
+    if total_cost == 0.0 {
+        return 0.0;
+    }
+    deliverable_units / total_cost
+}
+
+/// Get SEI rating
+pub fn sei_rating(sei: f64) -> &'static str {
+    if sei > 0.4 {
+        "Excellent"
+    } else if sei >= 0.2 {
+        "Good"
+    } else {
+        "Poor"
+    }
 }
 
 /// Normalize Cost Per Deliverable Unit
@@ -230,5 +316,88 @@ mod tests {
         assert_eq!(score.cost_efficiency, 0.8);
         assert_eq!(score.cache_efficiency, 0.6);
         assert_eq!(score.workflow_smoothness, 0.8);
+    }
+
+    #[test]
+    fn test_cer_raw() {
+        let cer = calculate_cer_raw(70000, 30000);
+        assert!((cer - 0.7).abs() < 0.01);
+
+        let cer_zero = calculate_cer_raw(0, 0);
+        assert_eq!(cer_zero, 0.0);
+    }
+
+    #[test]
+    fn test_cer_rating() {
+        assert_eq!(cer_rating(0.8), "Excellent");
+        assert_eq!(cer_rating(0.6), "Good");
+        assert_eq!(cer_rating(0.3), "Poor");
+    }
+
+    #[test]
+    fn test_cgr_simple() {
+        let cgr = calculate_cgr_simple(10000, 10);
+        assert_eq!(cgr, 1000.0);
+
+        let cgr_zero = calculate_cgr_simple(10000, 0);
+        assert_eq!(cgr_zero, 0.0);
+    }
+
+    #[test]
+    fn test_cgr_rating() {
+        assert_eq!(cgr_rating(500.0), "Sustainable");
+        assert_eq!(cgr_rating(1500.0), "Acceptable");
+        assert_eq!(cgr_rating(3000.0), "Warning");
+    }
+
+    #[test]
+    fn test_sei_f64() {
+        let sei = calculate_sei_f64(2.5, 5).unwrap();
+        assert_eq!(sei, 0.5);
+
+        assert!(calculate_sei_f64(2.5, 0).is_none());
+    }
+
+    #[test]
+    fn test_sei_cost() {
+        // 2 deliverable units / ($5 main + $3 subagent) = 0.25 DU per dollar
+        let sei = calculate_sei_cost(5.0, 3.0, 2.0);
+        assert!((sei - 0.25).abs() < 0.001);
+
+        // Zero cost should return 0
+        let sei_zero = calculate_sei_cost(0.0, 0.0, 2.0);
+        assert_eq!(sei_zero, 0.0);
+    }
+
+    #[test]
+    fn test_sei_rating() {
+        assert_eq!(sei_rating(0.5), "Excellent");
+        assert_eq!(sei_rating(0.3), "Good");
+        assert_eq!(sei_rating(0.1), "Poor");
+    }
+
+    #[test]
+    fn test_oes_without_subagents() {
+        // When no subagents, SEI weight should be redistributed
+        let score_no_sei = calculate_oes(0.8, 0.7, 0.6, None, 0.2);
+        let score_with_sei = calculate_oes(0.8, 0.7, 0.6, Some(0.5), 0.2);
+
+        // Score without SEI should still be valid
+        assert!(score_no_sei.overall > 0.0);
+        assert!(score_no_sei.overall <= 1.0);
+        assert!(score_no_sei.subagent_efficiency.is_none());
+
+        // Scores should differ
+        assert!((score_no_sei.overall - score_with_sei.overall).abs() > 0.01);
+    }
+
+    #[test]
+    fn test_efficiency_boundaries() {
+        // Test extreme values
+        let excellent = calculate_oes(1.0, 1.0, 1.0, Some(1.0), 0.0);
+        assert_eq!(excellent.rating, EfficiencyRating::Excellent);
+
+        let poor = calculate_oes(0.0, 0.0, 0.0, Some(0.0), 1.0);
+        assert_eq!(poor.rating, EfficiencyRating::NeedsImprovement);
     }
 }

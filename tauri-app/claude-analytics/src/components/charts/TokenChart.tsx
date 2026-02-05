@@ -22,7 +22,7 @@ export function TokenChart({ data, isLoading }: TokenChartProps) {
     return (
       <Card className="h-80">
         <CardHeader>
-          <CardTitle>Token Usage</CardTitle>
+          <CardTitle>Token Usage Over Time</CardTitle>
         </CardHeader>
         <CardContent className="flex h-56 items-center justify-center">
           <div className="animate-pulse text-gray-500">Loading...</div>
@@ -31,33 +31,47 @@ export function TokenChart({ data, isLoading }: TokenChartProps) {
     );
   }
 
-  const chartData = data.map((d) => ({
+  if (!data || data.length === 0) {
+    return (
+      <Card className="h-80">
+        <CardHeader>
+          <CardTitle>Token Usage Over Time</CardTitle>
+        </CardHeader>
+        <CardContent className="flex h-56 items-center justify-center">
+          <div className="text-gray-500">No data available</div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Sort by date and take last 30 days
+  const sortedData = [...data]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-30);
+
+  const chartData = sortedData.map((d) => ({
     date: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    input: d.total_input_tokens,
-    output: d.total_output_tokens,
-    cacheRead: d.total_cache_read_tokens,
+    tokens: d.total_tokens,
+    sessions: d.session_count,
+    turns: d.total_turns,
   }));
 
   return (
     <Card className="h-80">
       <CardHeader>
-        <CardTitle>Token Usage</CardTitle>
+        <CardTitle>Token Usage Over Time</CardTitle>
       </CardHeader>
       <CardContent className="h-56">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={chartData}>
             <defs>
-              <linearGradient id="inputGradient" x1="0" y1="0" x2="0" y2="1">
+              <linearGradient id="tokensGradient" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
                 <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
               </linearGradient>
-              <linearGradient id="outputGradient" x1="0" y1="0" x2="0" y2="1">
+              <linearGradient id="turnsGradient" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
                 <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-              </linearGradient>
-              <linearGradient id="cacheGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2e" />
@@ -80,29 +94,27 @@ export function TokenChart({ data, isLoading }: TokenChartProps) {
                 borderRadius: '8px',
               }}
               labelStyle={{ color: '#fff' }}
-              formatter={(value) => value !== undefined ? formatCompactNumber(value as number) : ''}
+              formatter={(value, name) => {
+                if (value === undefined) return ['', name];
+                const formattedValue = formatCompactNumber(value as number);
+                const label = name === 'tokens' ? 'Tokens' : name === 'turns' ? 'Turns' : String(name);
+                return [formattedValue, label];
+              }}
             />
             <Legend />
             <Area
               type="monotone"
-              dataKey="input"
-              name="Input"
+              dataKey="tokens"
+              name="Tokens"
               stroke="#3b82f6"
-              fill="url(#inputGradient)"
+              fill="url(#tokensGradient)"
             />
             <Area
               type="monotone"
-              dataKey="output"
-              name="Output"
+              dataKey="turns"
+              name="Turns"
               stroke="#10b981"
-              fill="url(#outputGradient)"
-            />
-            <Area
-              type="monotone"
-              dataKey="cacheRead"
-              name="Cache Read"
-              stroke="#8b5cf6"
-              fill="url(#cacheGradient)"
+              fill="url(#turnsGradient)"
             />
           </AreaChart>
         </ResponsiveContainer>

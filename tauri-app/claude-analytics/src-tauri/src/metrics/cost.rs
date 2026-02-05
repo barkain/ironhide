@@ -123,10 +123,100 @@ pub fn get_default_pricing() -> Vec<ModelPricing> {
 }
 
 /// Find pricing for a model by ID
+/// Supports exact matches, partial matches, and common aliases
 pub fn find_pricing(model_id: &str) -> Option<ModelPricing> {
+    let model_lower = model_id.to_lowercase();
+
+    // First try exact match
+    if let Some(pricing) = get_default_pricing()
+        .into_iter()
+        .find(|p| p.model_id == model_id)
+    {
+        return Some(pricing);
+    }
+
+    // Try partial match (model_id contains the pricing model_id)
+    if let Some(pricing) = get_default_pricing()
+        .into_iter()
+        .find(|p| model_id.contains(&p.model_id))
+    {
+        return Some(pricing);
+    }
+
+    // Try alias matching
+    if model_lower.contains("opus") {
+        return get_default_pricing().into_iter().find(|p| p.model_id.contains("opus"));
+    }
+    if model_lower.contains("sonnet") {
+        return get_default_pricing().into_iter().find(|p| p.model_id.contains("sonnet"));
+    }
+    if model_lower.contains("haiku") {
+        return get_default_pricing().into_iter().find(|p| p.model_id.contains("haiku"));
+    }
+
+    None
+}
+
+/// Get default pricing (Opus) as fallback
+pub fn get_default_pricing_fallback() -> ModelPricing {
     get_default_pricing()
         .into_iter()
-        .find(|p| p.model_id == model_id || model_id.contains(&p.model_id))
+        .find(|p| p.model_id.contains("opus"))
+        .unwrap()
+}
+
+/// Session-level cost aggregation
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SessionCost {
+    pub breakdown: CostBreakdown,
+    pub turn_count: u32,
+    pub avg_cost_per_turn: f64,
+    pub subagent_cost: f64,
+    pub total_with_subagents: f64,
+}
+
+impl SessionCost {
+    /// Create from breakdown and turn count
+    pub fn from_breakdown(breakdown: CostBreakdown, turn_count: u32) -> Self {
+        let avg_cost_per_turn = if turn_count > 0 {
+            breakdown.total_cost / turn_count as f64
+        } else {
+            0.0
+        };
+
+        Self {
+            turn_count,
+            avg_cost_per_turn,
+            total_with_subagents: breakdown.total_cost,
+            breakdown,
+            subagent_cost: 0.0,
+        }
+    }
+
+    /// Add subagent cost
+    pub fn add_subagent_cost(&mut self, cost: f64) {
+        self.subagent_cost += cost;
+        self.total_with_subagents = self.breakdown.total_cost + self.subagent_cost;
+    }
+}
+
+/// Calculate cost for a single turn
+pub fn calculate_turn_cost(tokens: &TurnTokens, model: &str) -> CostBreakdown {
+    let pricing = find_pricing(model).unwrap_or_else(get_default_pricing_fallback);
+    CostBreakdown::from_tokens(tokens, &pricing)
+}
+
+/// Calculate session cost from multiple turns
+pub fn calculate_session_cost(turns: &[TurnTokens], model: &str) -> SessionCost {
+    let pricing = find_pricing(model).unwrap_or_else(get_default_pricing_fallback);
+
+    let mut total_breakdown = CostBreakdown::default();
+    for turn in turns {
+        let turn_breakdown = CostBreakdown::from_tokens(turn, &pricing);
+        total_breakdown.add(&turn_breakdown);
+    }
+
+    SessionCost::from_breakdown(total_breakdown, turns.len() as u32)
 }
 
 #[cfg(test)]
@@ -164,5 +254,94 @@ mod tests {
         assert!((breakdown.input_cost - 5.00).abs() < 0.01);
         assert!((breakdown.output_cost - 2.50).abs() < 0.01);
         assert!((breakdown.cache_read_cost - 0.25).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_find_pricing_aliases() {
+        // Test exact match
+        assert!(find_pricing("claude-opus-4-5-20251101").is_some());
+
+        // Test alias match
+        let opus = find_pricing("opus").unwrap();
+        assert!(opus.model_id.contains("opus"));
+
+        let sonnet = find_pricing("sonnet").unwrap();
+        assert!(sonnet.model_id.contains("sonnet"));
+
+        let haiku = find_pricing("haiku").unwrap();
+        assert!(haiku.model_id.contains("haiku"));
+
+        // Test case insensitive
+        let opus_upper = find_pricing("OPUS").unwrap();
+        assert!(opus_upper.model_id.contains("opus"));
+    }
+
+    #[test]
+    fn test_calculate_turn_cost() {
+        let tokens = TurnTokens::new(1_000_000, 100_000, 500_000, 100_000, 0);
+        let cost = calculate_turn_cost(&tokens, "claude-opus-4-5-20251101");
+
+        // Input: 1M * $5/M = $5.00
+        // Output: 100K * $25/M = $2.50
+        // Cache read: 500K * $0.50/M = $0.25
+        // Cache write 5m: 100K * $6.25/M = $0.625
+        // Total: $8.375
+        assert!((cost.total_cost - 8.375).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_calculate_turn_cost_all_models() {
+        let tokens = TurnTokens::new(1_000_000, 100_000, 0, 0, 0);
+
+        // Opus: 1M * $5 + 100K * $25 = $5 + $2.50 = $7.50
+        let opus_cost = calculate_turn_cost(&tokens, "claude-opus-4-5-20251101");
+        assert!((opus_cost.total_cost - 7.5).abs() < 0.01);
+
+        // Sonnet: 1M * $3 + 100K * $15 = $3 + $1.50 = $4.50
+        let sonnet_cost = calculate_turn_cost(&tokens, "claude-sonnet-4-5-20251101");
+        assert!((sonnet_cost.total_cost - 4.5).abs() < 0.01);
+
+        // Haiku: 1M * $1 + 100K * $5 = $1 + $0.50 = $1.50
+        let haiku_cost = calculate_turn_cost(&tokens, "claude-haiku-4-5-20251101");
+        assert!((haiku_cost.total_cost - 1.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_calculate_session_cost() {
+        let turns = vec![
+            TurnTokens::new(1_000_000, 100_000, 0, 0, 0),
+            TurnTokens::new(1_000_000, 100_000, 0, 0, 0),
+        ];
+
+        let session_cost = calculate_session_cost(&turns, "claude-opus-4-5-20251101");
+
+        // Two turns at $7.50 each = $15.00
+        assert!((session_cost.breakdown.total_cost - 15.0).abs() < 0.01);
+        assert_eq!(session_cost.turn_count, 2);
+        assert!((session_cost.avg_cost_per_turn - 7.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_session_cost_with_subagents() {
+        let turns = vec![TurnTokens::new(1_000_000, 100_000, 0, 0, 0)];
+        let mut session_cost = calculate_session_cost(&turns, "claude-opus-4-5-20251101");
+
+        session_cost.add_subagent_cost(5.0);
+
+        assert!((session_cost.subagent_cost - 5.0).abs() < 0.001);
+        assert!((session_cost.total_with_subagents - 12.5).abs() < 0.01); // $7.50 + $5.00
+    }
+
+    #[test]
+    fn test_cache_write_pricing() {
+        // Test 5-minute cache write pricing
+        let tokens_5m = TurnTokens::new(0, 0, 0, 1_000_000, 0);
+        let cost_5m = calculate_turn_cost(&tokens_5m, "claude-opus-4-5-20251101");
+        assert!((cost_5m.cache_write_5m_cost - 6.25).abs() < 0.01);
+
+        // Test 1-hour cache write pricing
+        let tokens_1h = TurnTokens::new(0, 0, 0, 0, 1_000_000);
+        let cost_1h = calculate_turn_cost(&tokens_1h, "claude-opus-4-5-20251101");
+        assert!((cost_1h.cache_write_1h_cost - 10.0).abs() < 0.01);
     }
 }

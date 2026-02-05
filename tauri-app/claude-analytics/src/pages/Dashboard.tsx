@@ -1,5 +1,7 @@
+import { Link } from 'react-router-dom';
 import { Header } from '../components/layout/Header';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
+import { Badge } from '../components/ui/Badge';
 import { TokenChart } from '../components/charts/TokenChart';
 import { CostChart } from '../components/charts/CostChart';
 import { EfficiencyGauge } from '../components/charts/EfficiencyGauge';
@@ -8,10 +10,13 @@ import {
   useDailyMetrics,
   useProjectMetrics,
 } from '../hooks/useMetrics';
+import { useSessions, useSessionUpdates } from '../hooks/useSessions';
 import {
   formatCurrency,
   formatCompactNumber,
   formatNumber,
+  formatRelativeTime,
+  formatDuration,
 } from '../lib/utils';
 import {
   DollarSign,
@@ -20,6 +25,8 @@ import {
   FolderOpen,
   TrendingUp,
   TrendingDown,
+  ChevronRight,
+  Clock,
 } from 'lucide-react';
 
 interface StatCardProps {
@@ -63,9 +70,16 @@ function StatCard({ title, value, subtitle, icon: Icon, trend, isLoading }: Stat
 }
 
 export function Dashboard() {
+  // Subscribe to real-time updates
+  useSessionUpdates();
+
   const { data: summary, isLoading: summaryLoading } = useDashboardSummary();
   const { data: dailyMetrics, isLoading: dailyLoading } = useDailyMetrics();
   const { data: projectMetrics, isLoading: projectsLoading } = useProjectMetrics();
+  const { data: recentSessions, isLoading: sessionsLoading } = useSessions(5, 0);
+
+  // Calculate average efficiency from recent sessions if available
+  const avgEfficiency = summary?.avg_efficiency_score;
 
   return (
     <div className="flex flex-col">
@@ -93,8 +107,8 @@ export function Dashboard() {
           />
           <StatCard
             title="Total Tokens"
-            value={summary ? formatCompactNumber(summary.total_input_tokens + summary.total_output_tokens) : '0'}
-            subtitle={summary ? `${formatCompactNumber(summary.total_input_tokens)} in / ${formatCompactNumber(summary.total_output_tokens)} out` : undefined}
+            value={summary ? formatCompactNumber(summary.total_tokens) : '0'}
+            subtitle="Input + Output tokens"
             icon={Zap}
             isLoading={summaryLoading}
           />
@@ -113,65 +127,142 @@ export function Dashboard() {
           <CostChart data={projectMetrics || []} isLoading={projectsLoading} />
         </div>
 
-        {/* Efficiency and stats row */}
+        {/* Efficiency and Recent Sessions row */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           <EfficiencyGauge
-            value={summary?.cache_hit_rate || 0}
-            label="Cache Hit Rate"
-            description="Percentage of tokens served from cache"
+            value={avgEfficiency ?? 0}
+            label="Avg Efficiency Score"
+            description="Overall efficiency across sessions"
             isLoading={summaryLoading}
           />
 
           <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle>Cost Efficiency</CardTitle>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle>Recent Sessions</CardTitle>
+              <Link
+                to="/sessions"
+                className="text-sm text-[var(--color-primary-400)] hover:text-[var(--color-primary-300)]"
+              >
+                View all
+              </Link>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="rounded-lg bg-[var(--color-background)] p-4">
-                  <p className="text-sm text-gray-400">Avg Cost/Session</p>
-                  {summaryLoading ? (
-                    <div className="mt-1 h-6 w-20 animate-pulse rounded bg-gray-700" />
-                  ) : (
-                    <p className="mt-1 text-xl font-semibold text-white">
-                      {summary ? formatCurrency(summary.avg_cost_per_session) : '$0.00'}
-                    </p>
-                  )}
+              {sessionsLoading ? (
+                <div className="space-y-3">
+                  {[...Array(3)].map((_, i) => (
+                    <div key={i} className="h-16 animate-pulse rounded-lg bg-gray-700" />
+                  ))}
                 </div>
-                <div className="rounded-lg bg-[var(--color-background)] p-4">
-                  <p className="text-sm text-gray-400">Avg Turns/Session</p>
-                  {summaryLoading ? (
-                    <div className="mt-1 h-6 w-20 animate-pulse rounded bg-gray-700" />
-                  ) : (
-                    <p className="mt-1 text-xl font-semibold text-white">
-                      {summary ? summary.avg_turns_per_session.toFixed(1) : '0'}
-                    </p>
-                  )}
+              ) : recentSessions && recentSessions.length > 0 ? (
+                <div className="space-y-3">
+                  {recentSessions.map((session) => (
+                    <Link
+                      key={session.id}
+                      to={`/sessions/${session.id}`}
+                      className="flex items-center justify-between rounded-lg bg-[var(--color-background)] p-3 transition-colors hover:bg-gray-800"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-white truncate">
+                            {session.project_name}
+                          </span>
+                          {session.model && (
+                            <Badge variant="info" className="text-xs">
+                              {session.model.split('-').slice(-1)[0]}
+                            </Badge>
+                          )}
+                          {session.is_subagent && (
+                            <Badge variant="warning" className="text-xs">
+                              Subagent
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500 truncate">
+                          {session.project_path}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-4 text-sm text-gray-400 ml-4">
+                        <div className="flex items-center gap-1">
+                          <MessageSquare className="h-3 w-3" />
+                          <span>{session.total_turns}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <DollarSign className="h-3 w-3" />
+                          <span>{formatCurrency(session.total_cost)}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          <span>{formatDuration(session.duration_ms / 1000)}</span>
+                        </div>
+                        <span className="text-xs text-gray-500">
+                          {formatRelativeTime(session.started_at)}
+                        </span>
+                        <ChevronRight className="h-4 w-4 text-gray-600" />
+                      </div>
+                    </Link>
+                  ))}
                 </div>
-                <div className="rounded-lg bg-[var(--color-background)] p-4">
-                  <p className="text-sm text-gray-400">Cache Read Tokens</p>
-                  {summaryLoading ? (
-                    <div className="mt-1 h-6 w-20 animate-pulse rounded bg-gray-700" />
-                  ) : (
-                    <p className="mt-1 text-xl font-semibold text-white">
-                      {summary ? formatCompactNumber(summary.total_cache_read_tokens) : '0'}
-                    </p>
-                  )}
+              ) : (
+                <div className="flex flex-col items-center justify-center py-8 text-gray-500">
+                  <MessageSquare className="h-8 w-8 mb-2" />
+                  <p>No sessions found</p>
+                  <p className="text-xs">Sessions will appear here once you use Claude Code</p>
                 </div>
-                <div className="rounded-lg bg-[var(--color-background)] p-4">
-                  <p className="text-sm text-gray-400">Cache Write Tokens</p>
-                  {summaryLoading ? (
-                    <div className="mt-1 h-6 w-20 animate-pulse rounded bg-gray-700" />
-                  ) : (
-                    <p className="mt-1 text-xl font-semibold text-white">
-                      {summary ? formatCompactNumber(summary.total_cache_write_tokens) : '0'}
-                    </p>
-                  )}
-                </div>
-              </div>
+              )}
             </CardContent>
           </Card>
         </div>
+
+        {/* Cost Efficiency stats */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Cost Efficiency</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <div className="rounded-lg bg-[var(--color-background)] p-4">
+                <p className="text-sm text-gray-400">Avg Cost/Session</p>
+                {summaryLoading ? (
+                  <div className="mt-1 h-6 w-20 animate-pulse rounded bg-gray-700" />
+                ) : (
+                  <p className="mt-1 text-xl font-semibold text-white">
+                    {summary ? formatCurrency(summary.avg_cost_per_session) : '$0.00'}
+                  </p>
+                )}
+              </div>
+              <div className="rounded-lg bg-[var(--color-background)] p-4">
+                <p className="text-sm text-gray-400">Avg Turns/Session</p>
+                {summaryLoading ? (
+                  <div className="mt-1 h-6 w-20 animate-pulse rounded bg-gray-700" />
+                ) : (
+                  <p className="mt-1 text-xl font-semibold text-white">
+                    {summary ? summary.avg_turns_per_session.toFixed(1) : '0'}
+                  </p>
+                )}
+              </div>
+              <div className="rounded-lg bg-[var(--color-background)] p-4">
+                <p className="text-sm text-gray-400">Total Sessions</p>
+                {summaryLoading ? (
+                  <div className="mt-1 h-6 w-20 animate-pulse rounded bg-gray-700" />
+                ) : (
+                  <p className="mt-1 text-xl font-semibold text-white">
+                    {summary ? formatNumber(summary.total_sessions) : '0'}
+                  </p>
+                )}
+              </div>
+              <div className="rounded-lg bg-[var(--color-background)] p-4">
+                <p className="text-sm text-gray-400">Active Projects</p>
+                {summaryLoading ? (
+                  <div className="mt-1 h-6 w-20 animate-pulse rounded bg-gray-700" />
+                ) : (
+                  <p className="mt-1 text-xl font-semibold text-white">
+                    {summary ? formatNumber(summary.active_projects) : '0'}
+                  </p>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
