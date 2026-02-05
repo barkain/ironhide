@@ -4,7 +4,7 @@ import { Header } from '../components/layout/Header';
 import { SessionComparisonView } from '../components/comparison/SessionComparisonView';
 import { useAppStore } from '../lib/store';
 
-export function Compare() {
+function Compare() {
   const { sessionIds } = useParams<{ sessionIds?: string }>();
   const { setSelectedForComparison } = useAppStore();
 
@@ -32,3 +32,5 @@ export function Compare() {
     </div>
   );
 }
+
+export default Compare;

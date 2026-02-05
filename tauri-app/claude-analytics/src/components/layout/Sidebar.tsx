@@ -7,6 +7,7 @@ import {
   ChevronRight,
   BarChart3,
   GitCompare,
+  TrendingUp,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAppStore } from '../../lib/store';
@@ -24,6 +25,7 @@ export function Sidebar() {
   const navItems: NavItem[] = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/sessions', icon: History, label: 'Sessions' },
+    { to: '/trends', icon: TrendingUp, label: 'Trends' },
     {
       to: selectedForComparison.length > 0
         ? `/compare/${selectedForComparison.join(',')}`

@@ -263,3 +263,5 @@ export function CostDonutChart({ cost, isLoading }: CostDonutChartProps) {
     </Card>
   );
 }
+
+export default CostDonutChart;

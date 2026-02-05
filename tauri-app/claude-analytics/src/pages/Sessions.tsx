@@ -4,6 +4,7 @@ import { Header } from '../components/layout/Header';
 import { Card, CardContent } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
+import { ExportButton } from '../components/export';
 import { useSessions, useSessionUpdates } from '../hooks/useSessions';
 import { useAppStore } from '../lib/store';
 import {
@@ -32,7 +33,7 @@ import type { SessionSummary } from '../types';
 type SortField = 'date' | 'cost' | 'tokens' | 'turns';
 type SortDirection = 'asc' | 'desc';
 
-export function Sessions() {
+function Sessions() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('date');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
@@ -165,12 +166,18 @@ export function Sessions() {
             />
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-400">Sort by:</span>
-            <SortButton field="date" label="Date" />
-            <SortButton field="cost" label="Cost" />
-            <SortButton field="tokens" label="Tokens" />
-            <SortButton field="turns" label="Turns" />
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-400">Sort by:</span>
+              <SortButton field="date" label="Date" />
+              <SortButton field="cost" label="Cost" />
+              <SortButton field="tokens" label="Tokens" />
+              <SortButton field="turns" label="Turns" />
+            </div>
+            <ExportButton
+              sessionIds={selectedForComparison.length > 0 ? selectedForComparison : undefined}
+              mode="sessions"
+            />
           </div>
         </div>
 
@@ -315,3 +322,5 @@ function SessionCard({ session, isSelected, onToggleSelect, canSelect }: Session
     </div>
   );
 }
+
+export default Sessions;

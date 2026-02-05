@@ -1,8 +1,11 @@
 [package]
 name = "claude-analytics"
-version = "0.1.0"
-description = "Claude Code Analytics Dashboard"
-authors = ["you"]
+version = "0.2.0"
+description = "Claude Code Analytics Dashboard - Analyze Claude Code sessions with deep insights, metrics, and recommendations"
+authors = ["Claude Analytics Contributors"]
+license = "MIT"
+repository = "https://github.com/YOUR_USERNAME/claude-code-analytics-dashboard"
+homepage = "https://github.com/YOUR_USERNAME/claude-code-analytics-dashboard"
 edition = "2021"
 
 [lib]
@@ -16,6 +19,7 @@ tauri-build = { version = "2", features = [] }
 # Tauri framework
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
+tauri-plugin-updater = "2"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -41,6 +45,9 @@ dirs = "5.0"
 
 # Error handling
 thiserror = "2.0"
+
+# CSV export
+csv = "1.3"
 
 # Logging
 tracing = "0.1"

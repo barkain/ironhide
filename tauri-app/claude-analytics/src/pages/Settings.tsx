@@ -6,7 +6,7 @@ import { getSettings, updateSettings, type AppSettings } from '../lib/tauri';
 import { useAppStore } from '../lib/store';
 import { FolderOpen, RefreshCw, Palette, Save } from 'lucide-react';
 
-export function Settings() {
+function Settings() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -209,3 +209,5 @@ export function Settings() {
     </div>
   );
 }
+
+export default Settings;

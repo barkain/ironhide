@@ -8,7 +8,7 @@ import { useSession, useTurns } from '../hooks/useSessions';
 import { ArrowLeft, ArrowRight, Share2, Copy, Check } from 'lucide-react';
 import { useState, useCallback } from 'react';
 
-export function TurnDetail() {
+function TurnDetail() {
   const { id: sessionId, turnNumber: turnNumberParam } = useParams<{ id: string; turnNumber: string }>();
   const navigate = useNavigate();
   const { navigateBack, navigateToTurn } = useDrillDownNavigation();

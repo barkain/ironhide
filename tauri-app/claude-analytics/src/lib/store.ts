@@ -4,6 +4,8 @@ import type { DateRange } from '../types';
 
 const MAX_COMPARISON_SESSIONS = 3;
 
+export type PresetRange = '7d' | '30d' | '90d' | 'all' | 'custom';
+
 interface AppState {
   // UI State
   sidebarCollapsed: boolean;
@@ -13,6 +15,8 @@ interface AppState {
   // Date range filter
   dateRange: DateRange | null;
   setDateRange: (range: DateRange | null) => void;
+  presetRange: PresetRange;
+  setPresetRange: (preset: PresetRange) => void;
 
   // Selected project filter
   selectedProject: string | null;
@@ -48,6 +52,8 @@ export const useAppStore = create<AppState>()(
       // Date range filter
       dateRange: null,
       setDateRange: (range) => set({ dateRange: range }),
+      presetRange: 'all',
+      setPresetRange: (preset) => set({ presetRange: preset }),
 
       // Selected project filter
       selectedProject: null,
@@ -94,6 +100,7 @@ export const useAppStore = create<AppState>()(
       partialize: (state) => ({
         sidebarCollapsed: state.sidebarCollapsed,
         dateRange: state.dateRange,
+        presetRange: state.presetRange,
         selectedProject: state.selectedProject,
         theme: state.theme,
         selectedForComparison: state.selectedForComparison,

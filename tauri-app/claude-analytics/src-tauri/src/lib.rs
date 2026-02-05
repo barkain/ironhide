@@ -10,9 +10,13 @@
 
 pub mod commands;
 pub mod db;
+pub mod export;
 pub mod metrics;
 pub mod models;
 pub mod parser;
+pub mod patterns;
+pub mod recommendations;
+pub mod trends;
 pub mod watcher;
 
 use std::sync::Mutex;
@@ -82,6 +86,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             // Session commands
             commands::get_sessions,
@@ -96,10 +101,21 @@ pub fn run() {
             commands::compare_sessions,
             // Code changes commands
             commands::get_session_code_changes,
+            // Trend commands
+            commands::get_trends,
+            commands::get_cost_trend,
+            commands::get_efficiency_trend,
             // Utility commands
             commands::get_db_path,
             commands::refresh_sessions,
             commands::scan_new_sessions,
+            // Export commands
+            commands::export_sessions,
+            commands::export_trends,
+            // Recommendations commands
+            commands::get_recommendations,
+            // Anti-pattern detection commands
+            commands::detect_antipatterns,
         ])
         .setup(|app| {
             // Spawn background task to watch for new sessions

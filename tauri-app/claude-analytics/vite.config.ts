@@ -35,6 +35,35 @@ export default defineConfig({
     minify: !process.env.TAURI_ENV_DEBUG ? "esbuild" : false,
     // Produce sourcemaps for debug builds
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+    // Chunk size warning limit
+    chunkSizeWarningLimit: 500,
+    // Rollup options for manual chunk splitting
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Core React dependencies
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          // Data fetching and state management
+          'vendor-query': ['@tanstack/react-query'],
+          // Charting library - large bundle
+          'vendor-recharts': ['recharts'],
+          // Date utilities
+          'vendor-date': ['date-fns'],
+          // Virtualization
+          'vendor-virtual': ['@tanstack/react-virtual'],
+          // D3 Sankey for flow charts
+          'vendor-d3-sankey': ['d3-sankey'],
+          // Markdown rendering
+          'vendor-markdown': ['react-markdown', 'react-syntax-highlighter'],
+          // Date picker
+          'vendor-datepicker': ['react-day-picker'],
+          // State management
+          'vendor-zustand': ['zustand'],
+          // Tauri API
+          'vendor-tauri': ['@tauri-apps/api'],
+        },
+      },
+    },
   },
 
   // Environment variables prefix

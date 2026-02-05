@@ -155,3 +155,5 @@ export function CodeChurnChart({ data, isLoading, title = 'Code Churn by Turn' }
     </Card>
   );
 }
+
+export default CodeChurnChart;

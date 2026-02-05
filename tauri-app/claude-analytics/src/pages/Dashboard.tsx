@@ -69,7 +69,7 @@ function StatCard({ title, value, subtitle, icon: Icon, trend, isLoading }: Stat
   );
 }
 
-export function Dashboard() {
+function Dashboard() {
   // Subscribe to real-time updates
   useSessionUpdates();
 
@@ -86,6 +86,7 @@ export function Dashboard() {
       <Header
         title="Dashboard"
         subtitle="Overview of your Claude Code usage"
+        showQuickFilter={true}
       />
 
       <div className="flex-1 space-y-6 p-6">
@@ -267,3 +268,5 @@ export function Dashboard() {
     </div>
   );
 }
+
+export default Dashboard;

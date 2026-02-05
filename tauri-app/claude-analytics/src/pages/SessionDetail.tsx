@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, Suspense } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { Header } from '../components/layout/Header';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../components/ui/Card';
@@ -7,14 +7,18 @@ import { EfficiencyGauge } from '../components/charts/EfficiencyGauge';
 import { DrillDownBreadcrumb } from '../components/navigation/DrillDownBreadcrumb';
 import { VirtualizedTurnTable } from '../components/turns/VirtualizedTurnTable';
 import { TurnDetailView } from '../components/turns/TurnDetailView';
-import { TokenStackedAreaChart } from '../components/charts/TokenStackedAreaChart';
-import { CostDonutChart } from '../components/charts/CostDonutChart';
-import { EfficiencyRadarChart } from '../components/charts/EfficiencyRadarChart';
-import { ToolUsagePieChart, type ToolUsageData } from '../components/charts/ToolUsagePieChart';
-import { CodeChurnChart } from '../components/charts/CodeChurnChart';
-import { TurnHealthTimeline } from '../components/charts/TurnHealthTimeline';
-import { SubagentSankeyChart } from '../components/charts/SubagentSankeyChart';
+import { ComponentLoadingSpinner } from '../components/ui/PageLoadingSpinner';
+import type { ToolUsageData } from '../components/charts/ToolUsagePieChart';
 import { useSession, useTurns } from '../hooks/useSessions';
+
+// Lazy load heavy chart components
+const TokenStackedAreaChart = React.lazy(() => import('../components/charts/TokenStackedAreaChart'));
+const CostDonutChart = React.lazy(() => import('../components/charts/CostDonutChart'));
+const EfficiencyRadarChart = React.lazy(() => import('../components/charts/EfficiencyRadarChart'));
+const ToolUsagePieChart = React.lazy(() => import('../components/charts/ToolUsagePieChart').then(m => ({ default: m.ToolUsagePieChart })));
+const CodeChurnChart = React.lazy(() => import('../components/charts/CodeChurnChart'));
+const TurnHealthTimeline = React.lazy(() => import('../components/charts/TurnHealthTimeline'));
+const SubagentSankeyChart = React.lazy(() => import('../components/charts/SubagentSankeyChart').then(m => ({ default: m.SubagentSankeyChart })));
 import {
   formatCurrency,
   formatNumber,
@@ -66,7 +70,7 @@ const TABS: TabConfig[] = [
 // Main Component
 // ============================================================================
 
-export function SessionDetail() {
+function SessionDetail() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -399,11 +403,15 @@ function OverviewTab({ metrics, session, turns, turnsLoading }: OverviewTabProps
           label="Efficiency Score"
           description={`Grade: ${metrics.efficiency.oes_grade}`}
         />
-        <EfficiencyRadarChart
-          efficiency={metrics.efficiency}
-          isLoading={false}
-        />
-        <CostDonutChart cost={metrics.cost} isLoading={false} />
+        <Suspense fallback={<ComponentLoadingSpinner height={250} />}>
+          <EfficiencyRadarChart
+            efficiency={metrics.efficiency}
+            isLoading={false}
+          />
+        </Suspense>
+        <Suspense fallback={<ComponentLoadingSpinner height={250} />}>
+          <CostDonutChart cost={metrics.cost} isLoading={false} />
+        </Suspense>
       </div>
 
       {/* Session info and Efficiency metrics */}
@@ -498,10 +506,12 @@ function OverviewTab({ metrics, session, turns, turnsLoading }: OverviewTabProps
       </div>
 
       {/* Turn Health Timeline */}
-      <TurnHealthTimeline
-        turns={turns || []}
-        isLoading={turnsLoading}
-      />
+      <Suspense fallback={<ComponentLoadingSpinner height={200} />}>
+        <TurnHealthTimeline
+          turns={turns || []}
+          isLoading={turnsLoading}
+        />
+      </Suspense>
 
       {/* Tools summary */}
       {metrics.unique_tools.length > 0 && (
@@ -625,13 +635,15 @@ function TokensTab({ turns, turnsLoading, metrics }: TokensTabProps) {
       </Card>
 
       {/* Token stacked area chart */}
-      <TokenStackedAreaChart
-        turns={turns}
-        isLoading={turnsLoading}
-        title="Token Usage Over Time"
-        height={450}
-        showBrush={true}
-      />
+      <Suspense fallback={<ComponentLoadingSpinner height={450} />}>
+        <TokenStackedAreaChart
+          turns={turns}
+          isLoading={turnsLoading}
+          title="Token Usage Over Time"
+          height={450}
+          showBrush={true}
+        />
+      </Suspense>
 
       {/* Cost breakdown */}
       <Card>
@@ -755,7 +767,9 @@ function ToolsTab({ toolUsageData, uniqueTools, toolCount, isLoading }: ToolsTab
     <div className="space-y-6">
       {/* Tool usage pie chart */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <ToolUsagePieChart tools={toolUsageData} isLoading={isLoading} />
+        <Suspense fallback={<ComponentLoadingSpinner height={350} />}>
+          <ToolUsagePieChart tools={toolUsageData} isLoading={isLoading} />
+        </Suspense>
 
         <Card>
           <CardHeader>
@@ -892,7 +906,9 @@ function CodeTab({ codeChurnData, isLoading }: CodeTabProps) {
       </div>
 
       {/* Code churn chart */}
-      <CodeChurnChart data={codeChurnData} isLoading={isLoading} />
+      <Suspense fallback={<ComponentLoadingSpinner height={300} />}>
+        <CodeChurnChart data={codeChurnData} isLoading={isLoading} />
+      </Suspense>
 
       {/* Info card */}
       <Card>
@@ -968,11 +984,13 @@ function SubagentsTab({ subagentData, sessionCost, subagentCount, efficiency, is
       </div>
 
       {/* Sankey chart */}
-      <SubagentSankeyChart
-        subagents={subagentData}
-        sessionCost={sessionCost}
-        isLoading={isLoading}
-      />
+      <Suspense fallback={<ComponentLoadingSpinner height={384} />}>
+        <SubagentSankeyChart
+          subagents={subagentData}
+          sessionCost={sessionCost}
+          isLoading={isLoading}
+        />
+      </Suspense>
 
       {/* Subagent details table */}
       {subagentData.length > 0 && (
@@ -1063,11 +1081,13 @@ function HealthTab({ turns, onTurnClick, isLoading }: HealthTabProps) {
   return (
     <div className="space-y-6">
       {/* Health timeline */}
-      <TurnHealthTimeline
-        turns={turns}
-        onTurnClick={onTurnClick}
-        isLoading={isLoading}
-      />
+      <Suspense fallback={<ComponentLoadingSpinner height={200} />}>
+        <TurnHealthTimeline
+          turns={turns}
+          onTurnClick={onTurnClick}
+          isLoading={isLoading}
+        />
+      </Suspense>
 
       {/* Problematic turns */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -1236,3 +1256,5 @@ function NotFoundState() {
     </Card>
   );
 }
+
+export default SessionDetail;

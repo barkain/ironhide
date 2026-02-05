@@ -16,8 +16,16 @@ use crate::metrics::session::{
     calculate_session_metrics, estimate_deliverable_units, SessionMetricsInput,
 };
 use crate::metrics::tokens::{SessionTokens, TurnTokens};
+use crate::export::{
+    ExportFormat, ExportOptions, ExportableSession, ExportableTrend, ExportableTurn,
+    csv_export, json_export, get_export_directory, generate_export_filename,
+};
 use crate::parser::{
     find_session_by_id, parse_session_by_id, scan_claude_sessions, CompletedTurn, SessionFileInfo,
+};
+use crate::recommendations::{
+    engine::{generate_recommendations, generate_aggregate_recommendations},
+    types::{RecommendationInput, RecommendationSummary},
 };
 use crate::AppState;
 use crate::CommandError;
@@ -956,6 +964,582 @@ pub fn get_session_code_changes(
     }
 
     Ok(changes)
+}
+
+// ============================================================================
+// Export Commands
+// ============================================================================
+
+/// Export sessions to CSV or JSON format
+///
+/// Returns the file path of the exported file.
+#[tauri::command]
+pub fn export_sessions(
+    _state: tauri::State<'_, AppState>,
+    session_ids: Option<Vec<String>>,
+    options: ExportOptions,
+) -> Result<String, CommandError> {
+    let format = ExportFormat::from_str(&options.format)?;
+
+    // Get sessions to export
+    let all_sessions = scan_claude_sessions();
+    let sessions_to_export: Vec<SessionFileInfo> = if let Some(ids) = session_ids {
+        let id_set: HashSet<String> = ids.into_iter().collect();
+        all_sessions
+            .into_iter()
+            .filter(|s| id_set.contains(&s.session_id))
+            .collect()
+    } else {
+        all_sessions
+    };
+
+    // Filter by date range if specified
+    let sessions_to_export: Vec<SessionFileInfo> = if let Some((start, end)) = &options.date_range {
+        sessions_to_export
+            .into_iter()
+            .filter(|s| {
+                // Get session start date from parsing
+                if let Ok((turns, _)) = get_session_turns(&s.session_id) {
+                    if let Some(first_turn) = turns.first() {
+                        let session_date = &first_turn.started_at;
+                        return session_date >= start && session_date <= end;
+                    }
+                }
+                true // Include if we can't determine date
+            })
+            .collect()
+    } else {
+        sessions_to_export
+    };
+
+    // Convert to exportable format
+    let mut exportable_sessions: Vec<ExportableSession> = Vec::new();
+    let mut turns_map: HashMap<String, Vec<ExportableTurn>> = HashMap::new();
+
+    for file_info in &sessions_to_export {
+        match get_session_turns(&file_info.session_id) {
+            Ok((turns, _)) => {
+                let (
+                    session_tokens,
+                    total_breakdown,
+                    _unique_tools,
+                    models,
+                    _tool_count,
+                    _subagent_count,
+                    duration_ms,
+                ) = calculate_metrics_from_turns(&turns);
+
+                let started_at = turns.first().map(|t| t.started_at.clone());
+                let model = models.into_iter().next();
+
+                let mut exportable = ExportableSession {
+                    session_id: file_info.session_id.clone(),
+                    date: started_at.unwrap_or_else(|| "unknown".to_string()),
+                    project_name: extract_project_name(
+                        &file_info.project_path.clone().unwrap_or_default(),
+                    ),
+                    model,
+                    turns: turns.len() as u32,
+                    tokens: session_tokens.total(),
+                    cost: total_breakdown.total_cost,
+                    duration_ms,
+                    efficiency_score: None,
+                };
+
+                // Add efficiency score if metrics requested
+                if options.include_metrics && !turns.is_empty() {
+                    // Calculate CER as efficiency score
+                    let total = session_tokens.total();
+                    if total > 0 {
+                        let cer = session_tokens.total_cache_read as f64 / total as f64;
+                        exportable.efficiency_score = Some(cer);
+                    }
+                }
+
+                // Collect turns if requested
+                if options.include_turns {
+                    let exportable_turns: Vec<ExportableTurn> = turns
+                        .iter()
+                        .map(|t| ExportableTurn::from_turn_summary(&file_info.session_id, &turn_to_summary(t)))
+                        .collect();
+                    turns_map.insert(file_info.session_id.clone(), exportable_turns);
+                }
+
+                exportable_sessions.push(exportable);
+            }
+            Err(_) => continue,
+        }
+    }
+
+    // Generate export path
+    let export_dir = get_export_directory();
+    let filename = generate_export_filename("claude_sessions", format.extension());
+    let export_path = export_dir.join(&filename);
+
+    // Write to file
+    match format {
+        ExportFormat::Csv => {
+            if options.include_turns && !turns_map.is_empty() {
+                csv_export::write_combined_csv(&exportable_sessions, &turns_map, &export_path)?;
+            } else {
+                csv_export::write_sessions_csv(&exportable_sessions, &export_path)?;
+            }
+        }
+        ExportFormat::Json => {
+            let turns_ref = if options.include_turns {
+                Some(&turns_map)
+            } else {
+                None
+            };
+            json_export::write_sessions_json(&exportable_sessions, turns_ref, options.include_metrics, &export_path)?;
+        }
+    }
+
+    tracing::info!("Exported {} sessions to {}", exportable_sessions.len(), export_path.display());
+
+    Ok(export_path.to_string_lossy().to_string())
+}
+
+/// Export usage trends to CSV or JSON format
+///
+/// Aggregates session data by day for the specified number of days.
+/// Returns the file path of the exported file.
+#[tauri::command]
+pub fn export_trends(
+    _state: tauri::State<'_, AppState>,
+    days: u32,
+    format: String,
+) -> Result<String, CommandError> {
+    let export_format = ExportFormat::from_str(&format)?;
+
+    // Calculate the date range
+    let end_date = chrono::Utc::now();
+    let start_date = end_date - chrono::Duration::days(days as i64);
+
+    // Get all sessions
+    let all_sessions = scan_claude_sessions();
+
+    // Group sessions by date and aggregate metrics
+    let mut daily_data: HashMap<String, ExportableTrend> = HashMap::new();
+
+    for file_info in &all_sessions {
+        if let Ok((turns, _)) = get_session_turns(&file_info.session_id) {
+            if turns.is_empty() {
+                continue;
+            }
+
+            // Get session date
+            let session_date = turns.first().map(|t| &t.started_at).unwrap();
+
+            // Parse date and check if in range
+            if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(session_date) {
+                let utc_date = parsed.with_timezone(&chrono::Utc);
+                if utc_date < start_date || utc_date > end_date {
+                    continue;
+                }
+
+                let date_key = utc_date.format("%Y-%m-%d").to_string();
+
+                let (
+                    session_tokens,
+                    total_breakdown,
+                    _unique_tools,
+                    _models,
+                    _tool_count,
+                    _subagent_count,
+                    _duration_ms,
+                ) = calculate_metrics_from_turns(&turns);
+
+                // Calculate efficiency
+                let total = session_tokens.total();
+                let efficiency = if total > 0 {
+                    Some(session_tokens.total_cache_read as f64 / total as f64)
+                } else {
+                    None
+                };
+
+                let entry = daily_data.entry(date_key.clone()).or_insert_with(|| {
+                    ExportableTrend {
+                        date: date_key,
+                        session_count: 0,
+                        total_turns: 0,
+                        total_cost: 0.0,
+                        total_tokens: 0,
+                        avg_efficiency_score: None,
+                    }
+                });
+
+                entry.session_count += 1;
+                entry.total_turns += turns.len() as i32;
+                entry.total_cost += total_breakdown.total_cost;
+                entry.total_tokens += total as i64;
+
+                // Running average for efficiency
+                if let Some(eff) = efficiency {
+                    let current_avg = entry.avg_efficiency_score.unwrap_or(0.0);
+                    let count = entry.session_count as f64;
+                    entry.avg_efficiency_score = Some((current_avg * (count - 1.0) + eff) / count);
+                }
+            }
+        }
+    }
+
+    // Sort by date
+    let mut trends: Vec<ExportableTrend> = daily_data.into_values().collect();
+    trends.sort_by(|a, b| a.date.cmp(&b.date));
+
+    // Generate export path
+    let export_dir = get_export_directory();
+    let filename = generate_export_filename("claude_trends", export_format.extension());
+    let export_path = export_dir.join(&filename);
+
+    // Write to file
+    match export_format {
+        ExportFormat::Csv => {
+            csv_export::write_trends_csv(&trends, &export_path)?;
+        }
+        ExportFormat::Json => {
+            json_export::write_trends_json(&trends, days, &export_path)?;
+        }
+    }
+
+    tracing::info!("Exported {} days of trends to {}", trends.len(), export_path.display());
+
+    Ok(export_path.to_string_lossy().to_string())
+}
+
+// ============================================================================
+// Trend Commands
+// ============================================================================
+
+use crate::trends::{DailyTrend, TrendSummary, Granularity};
+use crate::trends::daily::{SessionData, calculate_trend_summary, get_daily_trends};
+
+/// Helper to convert sessions to trend data
+fn collect_session_trend_data() -> Vec<SessionData> {
+    let all_sessions = scan_claude_sessions();
+    let mut session_data = Vec::new();
+
+    for file_info in &all_sessions {
+        if let Ok((turns, _)) = get_session_turns(&file_info.session_id) {
+            if turns.is_empty() {
+                continue;
+            }
+
+            let (
+                session_tokens,
+                total_breakdown,
+                _unique_tools,
+                _models,
+                _tool_count,
+                _subagent_count,
+                _duration_ms,
+            ) = calculate_metrics_from_turns(&turns);
+
+            // Calculate efficiency (CER)
+            let total = session_tokens.total();
+            let efficiency = if total > 0 {
+                session_tokens.total_cache_read as f64 / total as f64
+            } else {
+                0.0
+            };
+
+            let started_at = turns.first().map(|t| t.started_at.clone()).unwrap_or_default();
+
+            session_data.push(SessionData {
+                started_at,
+                turns: turns.len() as u32,
+                tokens: total,
+                cost: total_breakdown.total_cost,
+                efficiency,
+            });
+        }
+    }
+
+    session_data
+}
+
+/// Get historical trends with optional date range and granularity
+///
+/// Returns aggregated session data with period-over-period comparisons.
+#[tauri::command]
+pub fn get_trends(
+    _state: tauri::State<'_, AppState>,
+    start_date: Option<String>,
+    end_date: Option<String>,
+    granularity: Option<String>,
+) -> Result<TrendSummary, String> {
+    let session_data = collect_session_trend_data();
+    let days = 30u32; // Default to 30 days if no date range specified
+
+    let summary = calculate_trend_summary(
+        &session_data,
+        start_date.as_deref(),
+        end_date.as_deref(),
+        days,
+    );
+
+    // Apply granularity transformation if needed
+    let _granularity = Granularity::from(granularity);
+
+    Ok(summary)
+}
+
+/// Get cost trend for the last N days
+///
+/// Returns daily cost data for chart visualization.
+#[tauri::command]
+pub fn get_cost_trend(
+    _state: tauri::State<'_, AppState>,
+    days: Option<u32>,
+) -> Result<Vec<DailyTrend>, String> {
+    let days = days.unwrap_or(30);
+    let session_data = collect_session_trend_data();
+
+    let daily = get_daily_trends(&session_data, days, None, None);
+
+    Ok(daily)
+}
+
+/// Get efficiency trend for the last N days
+///
+/// Returns daily efficiency data for chart visualization.
+#[tauri::command]
+pub fn get_efficiency_trend(
+    _state: tauri::State<'_, AppState>,
+    days: Option<u32>,
+) -> Result<Vec<DailyTrend>, String> {
+    let days = days.unwrap_or(30);
+    let session_data = collect_session_trend_data();
+
+    let daily = get_daily_trends(&session_data, days, None, None);
+
+    Ok(daily)
+}
+
+// ============================================================================
+// Recommendations Commands
+// ============================================================================
+
+/// Get recommendations for cost savings and efficiency improvements
+///
+/// Analyzes session metrics and generates actionable recommendations.
+/// If session_id is None, analyzes all sessions for aggregate recommendations.
+#[tauri::command]
+pub fn get_recommendations(
+    _state: tauri::State<'_, AppState>,
+    session_id: Option<String>,
+    limit: Option<u32>,
+) -> Result<RecommendationSummary, CommandError> {
+    if let Some(id) = session_id {
+        // Analyze single session
+        get_session_recommendations(&id, limit)
+    } else {
+        // Analyze all sessions for aggregate recommendations
+        get_aggregate_recommendations(limit)
+    }
+}
+
+/// Get recommendations for a specific session
+fn get_session_recommendations(
+    session_id: &str,
+    limit: Option<u32>,
+) -> Result<RecommendationSummary, CommandError> {
+    let file_info = find_session_by_id(session_id)
+        .ok_or_else(|| CommandError::SessionNotFound(session_id.to_string()))?;
+
+    let (turns, _) = get_session_turns(session_id)?;
+
+    if turns.is_empty() {
+        return Ok(RecommendationSummary::from_recommendations(
+            Vec::new(),
+            Some(session_id.to_string()),
+            1,
+        ));
+    }
+
+    let (
+        session_tokens,
+        total_breakdown,
+        unique_tools,
+        models,
+        tool_count,
+        subagent_count,
+        duration_ms,
+    ) = calculate_metrics_from_turns(&turns);
+
+    // Calculate full metrics for efficiency scores
+    let deliverable_units = estimate_deliverable_units(session_tokens.total_output);
+    let turn_count = turns.len() as u32;
+
+    let metrics_input = SessionMetricsInput {
+        tokens: session_tokens.clone(),
+        total_cost: total_breakdown.total_cost,
+        cost_breakdown: total_breakdown.clone(),
+        duration_ms,
+        turn_count,
+        tool_count,
+        unique_tools: unique_tools.clone(),
+        models_used: models.clone(),
+        subagent_count,
+        subagent_cost: 0.0, // TODO: Calculate from subagent sessions
+        deliverable_units,
+        rework_cycles: 0, // TODO: Detect rework patterns
+        clarification_cycles: 0,
+    };
+
+    let full_metrics = calculate_session_metrics(metrics_input);
+
+    // Build recommendation input
+    let primary_model = models.into_iter().next()
+        .unwrap_or_else(|| "claude-opus-4-5-20251101".to_string());
+
+    let rec_input = RecommendationInput {
+        session_id: Some(session_id.to_string()),
+        total_cost: total_breakdown.total_cost,
+        cer: full_metrics.efficiency.cer,
+        cgr: full_metrics.efficiency.cgr,
+        sei: full_metrics.efficiency.sei,
+        wfs: full_metrics.efficiency.wfs,
+        oes: full_metrics.efficiency.oes.overall,
+        turn_count,
+        subagent_count,
+        subagent_cost: 0.0, // TODO: Calculate from subagent sessions
+        primary_model,
+        input_tokens: session_tokens.total_input,
+        output_tokens: session_tokens.total_output,
+        cache_read_tokens: session_tokens.total_cache_read,
+        cache_write_tokens: session_tokens.total_cache_write_5m + session_tokens.total_cache_write_1h,
+        project_path: file_info.project_path.clone(),
+        branch: None, // TODO: Extract from session data if available
+        avg_cost_per_turn: full_metrics.cost.avg_cost_per_turn,
+    };
+
+    let mut summary = generate_recommendations(&rec_input);
+
+    // Apply limit if specified
+    if let Some(n) = limit {
+        summary = summary.limit(n as usize);
+    }
+
+    Ok(summary)
+}
+
+/// Get aggregate recommendations across all sessions
+fn get_aggregate_recommendations(limit: Option<u32>) -> Result<RecommendationSummary, CommandError> {
+    let sessions = scan_claude_sessions();
+
+    if sessions.is_empty() {
+        return Ok(RecommendationSummary::from_recommendations(Vec::new(), None, 0));
+    }
+
+    // Collect inputs from recent sessions (last 50 or fewer)
+    let mut inputs = Vec::new();
+
+    for file_info in sessions.iter().take(50) {
+        if let Ok((turns, _)) = get_session_turns(&file_info.session_id) {
+            if turns.is_empty() {
+                continue;
+            }
+
+            let (
+                session_tokens,
+                total_breakdown,
+                unique_tools,
+                models,
+                tool_count,
+                subagent_count,
+                duration_ms,
+            ) = calculate_metrics_from_turns(&turns);
+
+            let deliverable_units = estimate_deliverable_units(session_tokens.total_output);
+            let turn_count = turns.len() as u32;
+
+            let metrics_input = SessionMetricsInput {
+                tokens: session_tokens.clone(),
+                total_cost: total_breakdown.total_cost,
+                cost_breakdown: total_breakdown.clone(),
+                duration_ms,
+                turn_count,
+                tool_count,
+                unique_tools: unique_tools.clone(),
+                models_used: models.clone(),
+                subagent_count,
+                subagent_cost: 0.0,
+                deliverable_units,
+                rework_cycles: 0,
+                clarification_cycles: 0,
+            };
+
+            let full_metrics = calculate_session_metrics(metrics_input);
+
+            let primary_model = models.into_iter().next()
+                .unwrap_or_else(|| "claude-opus-4-5-20251101".to_string());
+
+            inputs.push(RecommendationInput {
+                session_id: Some(file_info.session_id.clone()),
+                total_cost: total_breakdown.total_cost,
+                cer: full_metrics.efficiency.cer,
+                cgr: full_metrics.efficiency.cgr,
+                sei: full_metrics.efficiency.sei,
+                wfs: full_metrics.efficiency.wfs,
+                oes: full_metrics.efficiency.oes.overall,
+                turn_count,
+                subagent_count,
+                subagent_cost: 0.0,
+                primary_model,
+                input_tokens: session_tokens.total_input,
+                output_tokens: session_tokens.total_output,
+                cache_read_tokens: session_tokens.total_cache_read,
+                cache_write_tokens: session_tokens.total_cache_write_5m + session_tokens.total_cache_write_1h,
+                project_path: file_info.project_path.clone(),
+                branch: None,
+                avg_cost_per_turn: full_metrics.cost.avg_cost_per_turn,
+            });
+        }
+    }
+
+    let mut summary = generate_aggregate_recommendations(&inputs);
+
+    // Apply limit if specified
+    if let Some(n) = limit {
+        summary = summary.limit(n as usize);
+    }
+
+    Ok(summary)
+}
+
+// ============================================================================
+// Anti-Pattern Detection Commands
+// ============================================================================
+
+/// Detect anti-patterns in sessions
+///
+/// Analyzes sessions for inefficient patterns:
+/// - SubagentSprawl: Too many subagents for output
+/// - ContextChurn: Poor cache utilization (CER < 0.4)
+/// - CostSpike: Turn cost > 3x session average
+/// - LongTurn: Turn duration > 5 minutes
+/// - ToolFailureSpree: 3+ consecutive tool failures
+/// - HighReworkRatio: Many edits to same files
+///
+/// # Arguments
+/// * `session_id` - Optional specific session to analyze. If None, scans all sessions.
+/// * `pattern_types` - Optional filter for specific patterns. If None, checks all.
+#[tauri::command]
+pub fn detect_antipatterns(
+    session_id: Option<String>,
+    pattern_types: Option<Vec<String>>,
+) -> Result<Vec<crate::patterns::DetectedPattern>, String> {
+    // Convert string pattern types to enum
+    let patterns = pattern_types.map(|types| {
+        types
+            .iter()
+            .filter_map(|s| crate::patterns::types::AntiPatternType::from_str(s))
+            .collect()
+    });
+
+    crate::patterns::detect_antipatterns(session_id, patterns, None)
 }
 
 // ============================================================================

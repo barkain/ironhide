@@ -86,3 +86,64 @@
 .animate-slide-in {
   animation: slideIn 0.3s ease-out;
 }
+
+/* Date picker dark theme overrides */
+.date-picker-dark .rdp {
+  --rdp-accent-color: var(--color-primary-600);
+  --rdp-accent-background-color: var(--color-primary-600);
+  --rdp-background-color: var(--color-surface);
+  color: white;
+}
+
+.date-picker-dark .rdp-day_button {
+  width: 2rem;
+  height: 2rem;
+}
+
+.date-picker-dark .rdp-day_button:hover:not([disabled]) {
+  background-color: #374151;
+}
+
+.date-picker-dark .rdp-selected .rdp-day_button {
+  background-color: var(--color-primary-600);
+  color: white;
+}
+
+.date-picker-dark .rdp-range_middle .rdp-day_button {
+  background-color: rgba(2, 111, 197, 0.3);
+}
+
+.date-picker-dark .rdp-today:not(.rdp-selected) .rdp-day_button {
+  color: var(--color-primary-400);
+  font-weight: bold;
+}
+
+.date-picker-dark .rdp-disabled .rdp-day_button {
+  color: #4b5563;
+  cursor: not-allowed;
+}
+
+.date-picker-dark .rdp-outside .rdp-day_button {
+  color: #4b5563;
+}
+
+.date-picker-dark .rdp-nav button {
+  color: #9ca3af;
+}
+
+.date-picker-dark .rdp-nav button:hover {
+  background-color: #374151;
+  color: white;
+}
+
+.date-picker-dark .rdp-caption_label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #d1d5db;
+}
+
+.date-picker-dark .rdp-head_cell {
+  color: #9ca3af;
+  font-size: 0.75rem;
+  font-weight: 500;
+}

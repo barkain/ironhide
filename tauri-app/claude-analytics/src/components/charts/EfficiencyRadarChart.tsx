@@ -202,3 +202,5 @@ export function EfficiencyRadarChart({ efficiency, isLoading }: EfficiencyRadarC
     </Card>
   );
 }
+
+export default EfficiencyRadarChart;

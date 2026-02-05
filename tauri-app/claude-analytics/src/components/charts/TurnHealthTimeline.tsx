@@ -350,3 +350,5 @@ export function TurnHealthTimeline({ turns, onTurnClick, isLoading }: TurnHealth
     </Card>
   );
 }
+
+export default TurnHealthTimeline;
