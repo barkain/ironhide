@@ -1,0 +1,38 @@
+{
+  "name": "claude-analytics",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.18",
+    "@tauri-apps/cli": "^2.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/react-router-dom": "^5.3.3",
+    "@vitejs/plugin-react": "^4.5.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.2.4"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.90.20",
+    "@tauri-apps/api": "^2.10.1",
+    "autoprefixer": "^10.4.24",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.563.0",
+    "postcss": "^8.5.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.13.0",
+    "recharts": "^3.7.0",
+    "tailwindcss": "^4.1.18",
+    "zustand": "^5.0.11"
+  }
+}

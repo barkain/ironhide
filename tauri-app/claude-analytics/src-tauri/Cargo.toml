@@ -1,0 +1,54 @@
+[package]
+name = "claude-analytics"
+version = "0.1.0"
+description = "Claude Code Analytics Dashboard"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+name = "claude_analytics_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri framework
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# File watching
+notify = "7.0"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# File globbing
+glob = "0.3"
+
+# Path handling
+dirs = "5.0"
+
+# Error handling
+thiserror = "2.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
