@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { DateRange } from '../types';
 
+const MAX_COMPARISON_SESSIONS = 3;
+
 interface AppState {
   // UI State
   sidebarCollapsed: boolean;
@@ -27,6 +29,12 @@ interface AppState {
   // Loading states
   isRefreshing: boolean;
   setIsRefreshing: (refreshing: boolean) => void;
+
+  // Session comparison selection
+  selectedForComparison: string[];
+  toggleSessionComparison: (sessionId: string) => void;
+  clearComparison: () => void;
+  setSelectedForComparison: (sessionIds: string[]) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -56,6 +64,30 @@ export const useAppStore = create<AppState>()(
       // Loading states
       isRefreshing: false,
       setIsRefreshing: (refreshing) => set({ isRefreshing: refreshing }),
+
+      // Session comparison selection
+      selectedForComparison: [],
+      toggleSessionComparison: (sessionId) =>
+        set((state) => {
+          const isSelected = state.selectedForComparison.includes(sessionId);
+          if (isSelected) {
+            return {
+              selectedForComparison: state.selectedForComparison.filter(
+                (id) => id !== sessionId
+              ),
+            };
+          }
+          // Only add if under max limit
+          if (state.selectedForComparison.length >= MAX_COMPARISON_SESSIONS) {
+            return state;
+          }
+          return {
+            selectedForComparison: [...state.selectedForComparison, sessionId],
+          };
+        }),
+      clearComparison: () => set({ selectedForComparison: [] }),
+      setSelectedForComparison: (sessionIds) =>
+        set({ selectedForComparison: sessionIds.slice(0, MAX_COMPARISON_SESSIONS) }),
     }),
     {
       name: 'claude-analytics-storage',
@@ -64,6 +96,7 @@ export const useAppStore = create<AppState>()(
         dateRange: state.dateRange,
         selectedProject: state.selectedProject,
         theme: state.theme,
+        selectedForComparison: state.selectedForComparison,
       }),
     }
   )

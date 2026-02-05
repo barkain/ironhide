@@ -135,6 +135,43 @@ pub struct TurnTokensResponse {
     pub total: u64,
 }
 
+/// Subagent summary for detailed subagent tracking
+#[derive(Debug, Clone, Serialize)]
+pub struct SubagentSummary {
+    pub agent_id: String,
+    pub slug: Option<String>,
+    pub turn_count: u32,
+    pub total_cost: f64,
+    pub total_tokens: u64,
+    pub tools_used: Vec<String>,
+}
+
+/// Session comparison result
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionComparison {
+    pub sessions: Vec<SessionSummary>,
+    pub metrics_comparison: MetricsComparison,
+}
+
+/// Metrics comparison between sessions
+#[derive(Debug, Clone, Serialize)]
+pub struct MetricsComparison {
+    pub cost_diff: f64,
+    pub token_diff: i64,
+    pub efficiency_diff: f64,
+    pub duration_diff: i64,
+}
+
+/// Code change tracked during a session
+#[derive(Debug, Clone, Serialize)]
+pub struct CodeChange {
+    pub file_path: String,
+    pub change_type: String,  // "create", "edit", "delete"
+    pub tool_name: String,    // "Write", "Edit", "Bash"
+    pub turn_number: u32,
+    pub timestamp: String,
+}
+
 // ============================================================================
 // Session Cache
 // ============================================================================
@@ -660,6 +697,267 @@ pub fn scan_new_sessions(
     Ok(summaries)
 }
 
+/// Get subagent details for a session
+///
+/// Returns information about all subagents spawned during the session,
+/// including their costs, tokens, and tools used.
+#[tauri::command]
+pub fn get_session_subagents(
+    _state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<SubagentSummary>, CommandError> {
+    let (turns, _) = get_session_turns(&session_id)?;
+
+    // Collect all subagent IDs from the session turns
+    let mut subagent_info: HashMap<String, SubagentSummary> = HashMap::new();
+
+    for turn in &turns {
+        for agent_id in &turn.subagent_ids {
+            let entry = subagent_info.entry(agent_id.clone()).or_insert_with(|| {
+                SubagentSummary {
+                    agent_id: agent_id.clone(),
+                    slug: None,
+                    turn_count: 0,
+                    total_cost: 0.0,
+                    total_tokens: 0,
+                    tools_used: Vec::new(),
+                }
+            });
+
+            entry.turn_count += 1;
+
+            // Add tools from this turn
+            for tool in &turn.tool_uses {
+                if !entry.tools_used.contains(&tool.name) {
+                    entry.tools_used.push(tool.name.clone());
+                }
+            }
+        }
+    }
+
+    // Try to load actual subagent session files for detailed metrics
+    let all_sessions = scan_claude_sessions();
+    for session in all_sessions {
+        if session.is_subagent {
+            // Check if this subagent belongs to our session
+            if let Some(entry) = subagent_info.get_mut(&session.session_id) {
+                // Parse the subagent session for detailed metrics
+                if let Ok((subagent_turns, _)) = get_session_turns(&session.session_id) {
+                    let (
+                        session_tokens,
+                        total_breakdown,
+                        unique_tools,
+                        _models,
+                        _tool_count,
+                        _subagent_count,
+                        _duration_ms,
+                    ) = calculate_metrics_from_turns(&subagent_turns);
+
+                    entry.total_cost = total_breakdown.total_cost;
+                    entry.total_tokens = session_tokens.total();
+                    entry.turn_count = subagent_turns.len() as u32;
+                    entry.tools_used = unique_tools.into_iter().collect();
+                }
+            }
+        }
+    }
+
+    Ok(subagent_info.into_values().collect())
+}
+
+/// Compare multiple sessions
+///
+/// Returns the sessions with their metrics and a comparison of key metrics
+/// between the first session and subsequent sessions.
+#[tauri::command]
+pub fn compare_sessions(
+    _state: tauri::State<'_, AppState>,
+    session_ids: Vec<String>,
+) -> Result<SessionComparison, CommandError> {
+    if session_ids.is_empty() {
+        return Err(CommandError::Internal("No sessions provided for comparison".to_string()));
+    }
+
+    let mut summaries = Vec::new();
+    let mut metrics_data: Vec<(f64, u64, f64, u64)> = Vec::new(); // (cost, tokens, cer, duration)
+
+    for id in &session_ids {
+        let file_info = find_session_by_id(id)
+            .ok_or_else(|| CommandError::SessionNotFound(id.to_string()))?;
+
+        let (turns, _) = get_session_turns(id)?;
+
+        let (
+            session_tokens,
+            total_breakdown,
+            _unique_tools,
+            models,
+            _tool_count,
+            _subagent_count,
+            duration_ms,
+        ) = calculate_metrics_from_turns(&turns);
+
+        let started_at = turns.first().map(|t| t.started_at.clone());
+        let last_activity = turns.last().and_then(|t| t.ended_at.clone());
+        let model = models.into_iter().next();
+
+        // Calculate CER for efficiency comparison
+        let total_tokens_val = session_tokens.total();
+        let cache_read = session_tokens.total_cache_read;
+        let cache_write = session_tokens.total_cache_write_5m + session_tokens.total_cache_write_1h;
+        let cer = if total_tokens_val > 0 {
+            cache_read as f64 / (cache_read + cache_write + session_tokens.total_input + session_tokens.total_output) as f64
+        } else {
+            0.0
+        };
+
+        metrics_data.push((total_breakdown.total_cost, total_tokens_val, cer, duration_ms));
+
+        summaries.push(SessionSummary {
+            id: file_info.session_id.clone(),
+            project_path: file_info.project_path.clone().unwrap_or_default(),
+            project_name: extract_project_name(&file_info.project_path.clone().unwrap_or_default()),
+            started_at: started_at.unwrap_or_else(|| "unknown".to_string()),
+            last_activity_at: last_activity,
+            model,
+            total_cost: total_breakdown.total_cost,
+            total_turns: turns.len() as u32,
+            total_tokens: total_tokens_val,
+            duration_ms,
+            is_subagent: file_info.is_subagent,
+            file_path: file_info.path.to_string_lossy().to_string(),
+        });
+    }
+
+    // Calculate comparison metrics (difference between first and last session)
+    let comparison = if metrics_data.len() >= 2 {
+        let first = &metrics_data[0];
+        let last = &metrics_data[metrics_data.len() - 1];
+
+        MetricsComparison {
+            cost_diff: last.0 - first.0,
+            token_diff: last.1 as i64 - first.1 as i64,
+            efficiency_diff: last.2 - first.2,
+            duration_diff: last.3 as i64 - first.3 as i64,
+        }
+    } else {
+        MetricsComparison {
+            cost_diff: 0.0,
+            token_diff: 0,
+            efficiency_diff: 0.0,
+            duration_diff: 0,
+        }
+    };
+
+    Ok(SessionComparison {
+        sessions: summaries,
+        metrics_comparison: comparison,
+    })
+}
+
+/// Get code changes made during a session
+///
+/// Analyzes tool uses to identify file operations (Write, Edit, Bash with file-modifying commands)
+/// and returns a list of code changes with their metadata.
+#[tauri::command]
+pub fn get_session_code_changes(
+    _state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<CodeChange>, CommandError> {
+    let (turns, _) = get_session_turns(&session_id)?;
+
+    let mut changes = Vec::new();
+
+    for turn in &turns {
+        for tool in &turn.tool_uses {
+            match tool.name.as_str() {
+                "Write" | "write" => {
+                    // Write tool creates or overwrites files
+                    if let Some(input) = &tool.input {
+                        if let Some(file_path) = input.get("file_path").and_then(|v| v.as_str()) {
+                            changes.push(CodeChange {
+                                file_path: file_path.to_string(),
+                                change_type: "create".to_string(),
+                                tool_name: "Write".to_string(),
+                                turn_number: turn.turn_number,
+                                timestamp: turn.started_at.clone(),
+                            });
+                        }
+                    }
+                }
+                "Edit" | "edit" => {
+                    // Edit tool modifies existing files
+                    if let Some(input) = &tool.input {
+                        if let Some(file_path) = input.get("file_path").and_then(|v| v.as_str()) {
+                            changes.push(CodeChange {
+                                file_path: file_path.to_string(),
+                                change_type: "edit".to_string(),
+                                tool_name: "Edit".to_string(),
+                                turn_number: turn.turn_number,
+                                timestamp: turn.started_at.clone(),
+                            });
+                        }
+                    }
+                }
+                "Bash" | "bash" => {
+                    // Bash tool might contain file operations
+                    if let Some(input) = &tool.input {
+                        if let Some(command) = input.get("command").and_then(|v| v.as_str()) {
+                            // Check for common file operations
+                            let file_ops = [
+                                ("rm ", "delete"),
+                                ("rm -", "delete"),
+                                ("touch ", "create"),
+                                ("mkdir ", "create"),
+                                ("mv ", "edit"),
+                                ("cp ", "create"),
+                                ("echo ", "edit"),  // echo > file
+                                ("cat >", "create"),
+                            ];
+
+                            for (pattern, change_type) in &file_ops {
+                                if command.contains(pattern) {
+                                    // Extract file path (simplified - takes first path-like argument)
+                                    let parts: Vec<&str> = command.split_whitespace().collect();
+                                    if let Some(file_path) = parts.iter().skip(1).find(|p| {
+                                        p.starts_with('/') || p.starts_with('.') || p.contains('/')
+                                    }) {
+                                        changes.push(CodeChange {
+                                            file_path: file_path.to_string(),
+                                            change_type: change_type.to_string(),
+                                            tool_name: "Bash".to_string(),
+                                            turn_number: turn.turn_number,
+                                            timestamp: turn.started_at.clone(),
+                                        });
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                "NotebookEdit" | "notebook_edit" => {
+                    // NotebookEdit modifies Jupyter notebooks
+                    if let Some(input) = &tool.input {
+                        if let Some(notebook_path) = input.get("notebook_path").and_then(|v| v.as_str()) {
+                            changes.push(CodeChange {
+                                file_path: notebook_path.to_string(),
+                                change_type: "edit".to_string(),
+                                tool_name: "NotebookEdit".to_string(),
+                                turn_number: turn.turn_number,
+                                timestamp: turn.started_at.clone(),
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Ok(changes)
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -744,5 +1042,188 @@ mod tests {
         let json = serde_json::to_string(&turn).unwrap();
         assert!(json.contains("\"turn_number\":1"));
         assert!(json.contains("\"tools_used\":[\"Read\",\"Bash\"]"));
+    }
+
+    #[test]
+    fn test_subagent_summary_serialization() {
+        let subagent = SubagentSummary {
+            agent_id: "agent-abc123".to_string(),
+            slug: Some("code-reviewer".to_string()),
+            turn_count: 5,
+            total_cost: 1.25,
+            total_tokens: 25000,
+            tools_used: vec!["Read".to_string(), "Grep".to_string(), "Glob".to_string()],
+        };
+
+        let json = serde_json::to_string(&subagent).unwrap();
+        assert!(json.contains("\"agent_id\":\"agent-abc123\""));
+        assert!(json.contains("\"slug\":\"code-reviewer\""));
+        assert!(json.contains("\"turn_count\":5"));
+        assert!(json.contains("\"total_cost\":1.25"));
+        assert!(json.contains("\"total_tokens\":25000"));
+        assert!(json.contains("\"tools_used\":[\"Read\",\"Grep\",\"Glob\"]"));
+    }
+
+    #[test]
+    fn test_subagent_summary_without_slug() {
+        let subagent = SubagentSummary {
+            agent_id: "agent-def456".to_string(),
+            slug: None,
+            turn_count: 3,
+            total_cost: 0.75,
+            total_tokens: 15000,
+            tools_used: vec!["Bash".to_string()],
+        };
+
+        let json = serde_json::to_string(&subagent).unwrap();
+        assert!(json.contains("\"agent_id\":\"agent-def456\""));
+        assert!(json.contains("\"slug\":null"));
+        assert!(json.contains("\"turn_count\":3"));
+    }
+
+    #[test]
+    fn test_metrics_comparison_serialization() {
+        let comparison = MetricsComparison {
+            cost_diff: 2.50,
+            token_diff: 10000,
+            efficiency_diff: 0.15,
+            duration_diff: 120000,
+        };
+
+        let json = serde_json::to_string(&comparison).unwrap();
+        assert!(json.contains("\"cost_diff\":2.5"));
+        assert!(json.contains("\"token_diff\":10000"));
+        assert!(json.contains("\"efficiency_diff\":0.15"));
+        assert!(json.contains("\"duration_diff\":120000"));
+    }
+
+    #[test]
+    fn test_metrics_comparison_negative_values() {
+        let comparison = MetricsComparison {
+            cost_diff: -1.25,
+            token_diff: -5000,
+            efficiency_diff: -0.10,
+            duration_diff: -60000,
+        };
+
+        let json = serde_json::to_string(&comparison).unwrap();
+        assert!(json.contains("\"cost_diff\":-1.25"));
+        assert!(json.contains("\"token_diff\":-5000"));
+        assert!(json.contains("\"efficiency_diff\":-0.1"));
+        assert!(json.contains("\"duration_diff\":-60000"));
+    }
+
+    #[test]
+    fn test_session_comparison_serialization() {
+        let session1 = SessionSummary {
+            id: "session-1".to_string(),
+            project_path: "/path/to/project".to_string(),
+            project_name: "project".to_string(),
+            started_at: "2026-01-14T07:00:00.000Z".to_string(),
+            last_activity_at: Some("2026-01-14T08:00:00.000Z".to_string()),
+            model: Some("claude-opus-4-5-20251101".to_string()),
+            total_cost: 3.00,
+            total_turns: 5,
+            total_tokens: 30000,
+            duration_ms: 600000,
+            is_subagent: false,
+            file_path: "/path/to/session1.jsonl".to_string(),
+        };
+
+        let session2 = SessionSummary {
+            id: "session-2".to_string(),
+            project_path: "/path/to/project".to_string(),
+            project_name: "project".to_string(),
+            started_at: "2026-01-14T09:00:00.000Z".to_string(),
+            last_activity_at: Some("2026-01-14T10:00:00.000Z".to_string()),
+            model: Some("claude-opus-4-5-20251101".to_string()),
+            total_cost: 5.50,
+            total_turns: 8,
+            total_tokens: 40000,
+            duration_ms: 720000,
+            is_subagent: false,
+            file_path: "/path/to/session2.jsonl".to_string(),
+        };
+
+        let comparison = SessionComparison {
+            sessions: vec![session1, session2],
+            metrics_comparison: MetricsComparison {
+                cost_diff: 2.50,
+                token_diff: 10000,
+                efficiency_diff: 0.05,
+                duration_diff: 120000,
+            },
+        };
+
+        let json = serde_json::to_string(&comparison).unwrap();
+        assert!(json.contains("\"sessions\":["));
+        assert!(json.contains("\"session-1\""));
+        assert!(json.contains("\"session-2\""));
+        assert!(json.contains("\"metrics_comparison\""));
+        assert!(json.contains("\"cost_diff\":2.5"));
+    }
+
+    #[test]
+    fn test_code_change_serialization() {
+        let change = CodeChange {
+            file_path: "/path/to/file.rs".to_string(),
+            change_type: "edit".to_string(),
+            tool_name: "Edit".to_string(),
+            turn_number: 3,
+            timestamp: "2026-01-14T07:45:00.000Z".to_string(),
+        };
+
+        let json = serde_json::to_string(&change).unwrap();
+        assert!(json.contains("\"file_path\":\"/path/to/file.rs\""));
+        assert!(json.contains("\"change_type\":\"edit\""));
+        assert!(json.contains("\"tool_name\":\"Edit\""));
+        assert!(json.contains("\"turn_number\":3"));
+        assert!(json.contains("\"timestamp\":\"2026-01-14T07:45:00.000Z\""));
+    }
+
+    #[test]
+    fn test_code_change_create_type() {
+        let change = CodeChange {
+            file_path: "/new/file.ts".to_string(),
+            change_type: "create".to_string(),
+            tool_name: "Write".to_string(),
+            turn_number: 1,
+            timestamp: "2026-01-14T07:30:00.000Z".to_string(),
+        };
+
+        let json = serde_json::to_string(&change).unwrap();
+        assert!(json.contains("\"change_type\":\"create\""));
+        assert!(json.contains("\"tool_name\":\"Write\""));
+    }
+
+    #[test]
+    fn test_code_change_delete_type() {
+        let change = CodeChange {
+            file_path: "/old/file.py".to_string(),
+            change_type: "delete".to_string(),
+            tool_name: "Bash".to_string(),
+            turn_number: 10,
+            timestamp: "2026-01-14T09:00:00.000Z".to_string(),
+        };
+
+        let json = serde_json::to_string(&change).unwrap();
+        assert!(json.contains("\"change_type\":\"delete\""));
+        assert!(json.contains("\"tool_name\":\"Bash\""));
+        assert!(json.contains("\"turn_number\":10"));
+    }
+
+    #[test]
+    fn test_code_change_notebook_edit() {
+        let change = CodeChange {
+            file_path: "/notebooks/analysis.ipynb".to_string(),
+            change_type: "edit".to_string(),
+            tool_name: "NotebookEdit".to_string(),
+            turn_number: 7,
+            timestamp: "2026-01-14T08:30:00.000Z".to_string(),
+        };
+
+        let json = serde_json::to_string(&change).unwrap();
+        assert!(json.contains("\"file_path\":\"/notebooks/analysis.ipynb\""));
+        assert!(json.contains("\"tool_name\":\"NotebookEdit\""));
     }
 }

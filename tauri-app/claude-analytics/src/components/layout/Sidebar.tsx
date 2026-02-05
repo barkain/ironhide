@@ -6,18 +6,34 @@ import {
   ChevronLeft,
   ChevronRight,
   BarChart3,
+  GitCompare,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAppStore } from '../../lib/store';
 
-const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/sessions', icon: History, label: 'Sessions' },
-  { to: '/settings', icon: Settings, label: 'Settings' },
-];
+interface NavItem {
+  to: string;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  badge?: number;
+}
 
 export function Sidebar() {
-  const { sidebarCollapsed, toggleSidebar } = useAppStore();
+  const { sidebarCollapsed, toggleSidebar, selectedForComparison } = useAppStore();
+
+  const navItems: NavItem[] = [
+    { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+    { to: '/sessions', icon: History, label: 'Sessions' },
+    {
+      to: selectedForComparison.length > 0
+        ? `/compare/${selectedForComparison.join(',')}`
+        : '/compare',
+      icon: GitCompare,
+      label: 'Compare',
+      badge: selectedForComparison.length > 0 ? selectedForComparison.length : undefined,
+    },
+    { to: '/settings', icon: Settings, label: 'Settings' },
+  ];
 
   return (
     <aside
@@ -42,20 +58,36 @@ export function Sidebar() {
       <nav className="flex-1 p-4">
         <ul className="space-y-2">
           {navItems.map((item) => (
-            <li key={item.to}>
+            <li key={item.label}>
               <NavLink
                 to={item.to}
                 className={({ isActive }) =>
                   cn(
-                    'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                    'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors relative',
                     isActive
                       ? 'bg-[var(--color-primary-600)]/20 text-[var(--color-primary-400)]'
                       : 'text-gray-400 hover:bg-gray-800 hover:text-white'
                   )
                 }
               >
-                <item.icon className="h-5 w-5 shrink-0" />
-                {!sidebarCollapsed && <span>{item.label}</span>}
+                <div className="relative">
+                  <item.icon className="h-5 w-5 shrink-0" />
+                  {item.badge !== undefined && sidebarCollapsed && (
+                    <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-[var(--color-primary-500)] text-[10px] font-bold text-white">
+                      {item.badge}
+                    </span>
+                  )}
+                </div>
+                {!sidebarCollapsed && (
+                  <>
+                    <span>{item.label}</span>
+                    {item.badge !== undefined && (
+                      <span className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[var(--color-primary-500)] px-1.5 text-xs font-bold text-white">
+                        {item.badge}
+                      </span>
+                    )}
+                  </>
+                )}
               </NavLink>
             </li>
           ))}

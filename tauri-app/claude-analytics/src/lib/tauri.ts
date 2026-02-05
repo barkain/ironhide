@@ -257,3 +257,26 @@ export async function getToolUsage(): Promise<{ tool_name: string; usage_count: 
 export async function exportData(_format: 'csv' | 'json', _dateRange?: DateRange): Promise<string> {
   return '';
 }
+
+// ============================================================================
+// Session Comparison Commands
+// ============================================================================
+
+/** Comparison metrics between sessions */
+export interface MetricsComparison {
+  cost_diff: number;
+  token_diff: number;
+  efficiency_diff: number;
+  duration_diff: number;
+}
+
+/** Session comparison result */
+export interface SessionComparisonResult {
+  sessions: SessionSummary[];
+  metrics_comparison: MetricsComparison;
+}
+
+/** Compare multiple sessions by IDs (2-3 sessions) */
+export async function compareSessions(sessionIds: string[]): Promise<SessionComparisonResult> {
+  return invoke('compare_sessions', { sessionIds });
+}

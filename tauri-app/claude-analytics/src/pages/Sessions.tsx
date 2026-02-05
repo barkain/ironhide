@@ -1,15 +1,18 @@
 import { useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Header } from '../components/layout/Header';
 import { Card, CardContent } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
+import { Button } from '../components/ui/Button';
 import { useSessions, useSessionUpdates } from '../hooks/useSessions';
+import { useAppStore } from '../lib/store';
 import {
   formatCurrency,
   formatNumber,
   formatRelativeTime,
   formatDuration,
   formatCompactNumber,
+  cn,
 } from '../lib/utils';
 import {
   ChevronRight,
@@ -20,6 +23,9 @@ import {
   SortAsc,
   SortDesc,
   Zap,
+  GitCompare,
+  Check,
+  X,
 } from 'lucide-react';
 import type { SessionSummary } from '../types';
 
@@ -30,11 +36,16 @@ export function Sessions() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('date');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const navigate = useNavigate();
 
   // Subscribe to real-time updates
   useSessionUpdates();
 
   const { data: sessions, isLoading } = useSessions(100, 0);
+  const { selectedForComparison, toggleSessionComparison, clearComparison } = useAppStore();
+
+  const canCompare = selectedForComparison.length >= 2;
+  const maxSelected = selectedForComparison.length >= 3;
 
   // Filter and sort sessions
   const filteredSessions = useMemo(() => {
@@ -105,6 +116,42 @@ export function Sessions() {
       />
 
       <div className="flex-1 p-6">
+        {/* Comparison selection banner */}
+        {selectedForComparison.length > 0 && (
+          <div className="mb-4 flex items-center justify-between rounded-lg border border-[var(--color-primary-500)]/30 bg-[var(--color-primary-600)]/10 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <GitCompare className="h-5 w-5 text-[var(--color-primary-400)]" />
+              <span className="text-sm text-white">
+                <span className="font-semibold">{selectedForComparison.length}</span>
+                {' session'}
+                {selectedForComparison.length !== 1 ? 's' : ''} selected for comparison
+                {maxSelected && (
+                  <span className="ml-2 text-amber-400">(max 3)</span>
+                )}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearComparison}
+              >
+                <X className="h-4 w-4 mr-1" />
+                Clear
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={!canCompare}
+                onClick={() => navigate(`/compare/${selectedForComparison.join(',')}`)}
+              >
+                <GitCompare className="h-4 w-4 mr-1" />
+                Compare Selected
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Search and Sort bar */}
         <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative flex-1 max-w-md">
@@ -160,7 +207,13 @@ export function Sessions() {
         ) : (
           <div className="space-y-3">
             {filteredSessions.map((session) => (
-              <SessionCard key={session.id} session={session} />
+              <SessionCard
+                key={session.id}
+                session={session}
+                isSelected={selectedForComparison.includes(session.id)}
+                onToggleSelect={() => toggleSessionComparison(session.id)}
+                canSelect={!maxSelected}
+              />
             ))}
           </div>
         )}
@@ -169,52 +222,96 @@ export function Sessions() {
   );
 }
 
-function SessionCard({ session }: { session: SessionSummary }) {
-  return (
-    <Link to={`/sessions/${session.id}`}>
-      <Card className="transition-colors hover:bg-gray-800/50">
-        <CardContent className="flex items-center justify-between">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-3">
-              <h3 className="font-medium text-white truncate">
-                {session.project_name}
-              </h3>
-              {session.model && (
-                <Badge variant="info">{session.model}</Badge>
-              )}
-              {session.is_subagent && (
-                <Badge variant="warning">Subagent</Badge>
-              )}
-            </div>
-            <p className="mt-1 text-sm text-gray-500 truncate max-w-md">
-              {session.project_path}
-            </p>
-          </div>
+interface SessionCardProps {
+  session: SessionSummary;
+  isSelected: boolean;
+  onToggleSelect: () => void;
+  canSelect: boolean;
+}
 
-          <div className="flex items-center gap-6 text-sm ml-4">
-            <div className="flex items-center gap-2 text-gray-400">
-              <MessageSquare className="h-4 w-4" />
-              <span>{formatNumber(session.total_turns)} turns</span>
+function SessionCard({ session, isSelected, onToggleSelect, canSelect }: SessionCardProps) {
+  const handleCheckboxClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (canSelect || isSelected) {
+      onToggleSelect();
+    }
+  };
+
+  return (
+    <div className="relative group">
+      <Link to={`/sessions/${session.id}`}>
+        <Card
+          className={cn(
+            'transition-colors hover:bg-gray-800/50',
+            isSelected && 'ring-2 ring-[var(--color-primary-500)] bg-[var(--color-primary-600)]/5'
+          )}
+        >
+          <CardContent className="flex items-center justify-between">
+            {/* Comparison checkbox */}
+            <button
+              onClick={handleCheckboxClick}
+              className={cn(
+                'flex h-5 w-5 shrink-0 items-center justify-center rounded border mr-4 transition-all',
+                isSelected
+                  ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)] text-white'
+                  : canSelect
+                  ? 'border-gray-600 hover:border-[var(--color-primary-400)] hover:bg-gray-800'
+                  : 'border-gray-700 text-gray-700 cursor-not-allowed opacity-50'
+              )}
+              title={
+                isSelected
+                  ? 'Remove from comparison'
+                  : canSelect
+                  ? 'Add to comparison'
+                  : 'Maximum 3 sessions for comparison'
+              }
+            >
+              {isSelected && <Check className="h-3 w-3" />}
+            </button>
+
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-3">
+                <h3 className="font-medium text-white truncate">
+                  {session.project_name}
+                </h3>
+                {session.model && (
+                  <Badge variant="info">{session.model}</Badge>
+                )}
+                {session.is_subagent && (
+                  <Badge variant="warning">Subagent</Badge>
+                )}
+              </div>
+              <p className="mt-1 text-sm text-gray-500 truncate max-w-md">
+                {session.project_path}
+              </p>
             </div>
-            <div className="flex items-center gap-2 text-gray-400">
-              <Zap className="h-4 w-4" />
-              <span>{formatCompactNumber(session.total_tokens)}</span>
+
+            <div className="flex items-center gap-6 text-sm ml-4">
+              <div className="flex items-center gap-2 text-gray-400">
+                <MessageSquare className="h-4 w-4" />
+                <span>{formatNumber(session.total_turns)} turns</span>
+              </div>
+              <div className="flex items-center gap-2 text-gray-400">
+                <Zap className="h-4 w-4" />
+                <span>{formatCompactNumber(session.total_tokens)}</span>
+              </div>
+              <div className="flex items-center gap-2 text-gray-400">
+                <DollarSign className="h-4 w-4" />
+                <span>{formatCurrency(session.total_cost)}</span>
+              </div>
+              <div className="flex items-center gap-2 text-gray-400">
+                <Clock className="h-4 w-4" />
+                <span>{formatDuration(session.duration_ms / 1000)}</span>
+              </div>
+              <div className="text-gray-500 min-w-[80px] text-right">
+                {formatRelativeTime(session.started_at)}
+              </div>
+              <ChevronRight className="h-5 w-5 text-gray-600" />
             </div>
-            <div className="flex items-center gap-2 text-gray-400">
-              <DollarSign className="h-4 w-4" />
-              <span>{formatCurrency(session.total_cost)}</span>
-            </div>
-            <div className="flex items-center gap-2 text-gray-400">
-              <Clock className="h-4 w-4" />
-              <span>{formatDuration(session.duration_ms / 1000)}</span>
-            </div>
-            <div className="text-gray-500 min-w-[80px] text-right">
-              {formatRelativeTime(session.started_at)}
-            </div>
-            <ChevronRight className="h-5 w-5 text-gray-600" />
-          </div>
-        </CardContent>
-      </Card>
-    </Link>
+          </CardContent>
+        </Card>
+      </Link>
+    </div>
   );
 }

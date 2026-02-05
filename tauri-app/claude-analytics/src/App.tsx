@@ -4,6 +4,8 @@ import { Layout } from './components/layout/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { Sessions } from './pages/Sessions';
 import { SessionDetail } from './pages/SessionDetail';
+import { TurnDetail } from './pages/TurnDetail';
+import { Compare } from './pages/Compare';
 import { Settings } from './pages/Settings';
 
 const queryClient = new QueryClient({
@@ -24,6 +26,9 @@ function App() {
             <Route index element={<Dashboard />} />
             <Route path="sessions" element={<Sessions />} />
             <Route path="sessions/:id" element={<SessionDetail />} />
+            <Route path="sessions/:id/turns/:turnNumber" element={<TurnDetail />} />
+            <Route path="compare" element={<Compare />} />
+            <Route path="compare/:sessionIds" element={<Compare />} />
             <Route path="settings" element={<Settings />} />
           </Route>
         </Routes>

@@ -90,6 +90,12 @@ pub fn run() {
             commands::get_session_count,
             // Turn commands
             commands::get_turns,
+            // Subagent commands
+            commands::get_session_subagents,
+            // Comparison commands
+            commands::compare_sessions,
+            // Code changes commands
+            commands::get_session_code_changes,
             // Utility commands
             commands::get_db_path,
             commands::refresh_sessions,

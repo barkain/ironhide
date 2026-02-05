@@ -106,7 +106,7 @@ pub fn scan_claude_sessions() -> Vec<SessionFileInfo> {
 }
 
 /// Scan the projects directory for session files
-fn scan_projects_directory(projects_dir: &PathBuf, sessions: &mut Vec<SessionFileInfo>) {
+fn scan_projects_directory(projects_dir: &std::path::Path, sessions: &mut Vec<SessionFileInfo>) {
     let entries = match std::fs::read_dir(projects_dir) {
         Ok(e) => e,
         Err(e) => {
@@ -154,7 +154,7 @@ fn scan_projects_directory(projects_dir: &PathBuf, sessions: &mut Vec<SessionFil
 
 /// Scan a subagents directory for agent session files
 fn scan_subagents_directory(
-    subagents_dir: &PathBuf,
+    subagents_dir: &std::path::Path,
     project_path: Option<String>,
     sessions: &mut Vec<SessionFileInfo>,
 ) {
@@ -176,7 +176,7 @@ fn scan_subagents_directory(
 
 /// Create session info from a file path
 fn create_session_info(
-    path: &PathBuf,
+    path: &std::path::Path,
     project_path: Option<String>,
     is_subagent: bool,
 ) -> Option<SessionFileInfo> {
@@ -196,7 +196,7 @@ fn create_session_info(
         .unwrap_or_else(|| "unknown".to_string());
 
     Some(SessionFileInfo {
-        path: path.clone(),
+        path: path.to_path_buf(),
         session_id,
         project_path,
         modified: metadata.modified().ok()?,
@@ -209,7 +209,7 @@ fn create_session_info(
 ///
 /// Claude encodes paths like /Users/user/Projects/myproject as
 /// -Users-user-Projects-myproject
-fn decode_project_path(dir_path: &PathBuf) -> Option<String> {
+fn decode_project_path(dir_path: &std::path::Path) -> Option<String> {
     let dir_name = dir_path.file_name()?.to_str()?;
 
     // Replace dashes with slashes, handling the leading dash

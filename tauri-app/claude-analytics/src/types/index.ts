@@ -168,6 +168,16 @@ export interface ToolUsage {
   avg_cost_per_use: number;
 }
 
+/** Subagent summary (matches Rust SubagentSummary) */
+export interface SubagentSummary {
+  agent_id: string;
+  slug: string | null;
+  turn_count: number;
+  total_cost: number;
+  total_tokens: number;
+  tools_used: string[];
+}
+
 // ============================================================================
 // Filter/Query Types
 // ============================================================================
