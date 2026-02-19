@@ -5,6 +5,7 @@
 //! instead of relying solely on database queries.
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
 use std::time::{Instant, SystemTime};
@@ -278,6 +279,45 @@ fn clear_all_caches() {
     SESSIONS_PRELOADED.store(false, Ordering::SeqCst);
 }
 
+/// Get file modification time as ISO-8601 timestamp string
+///
+/// Returns None if the file doesn't exist or metadata cannot be read.
+/// Used for cache invalidation - if the mtime changes, we need to re-parse.
+pub fn get_file_mtime(path: &Path) -> Option<String> {
+    let metadata = std::fs::metadata(path).ok()?;
+    let modified = metadata.modified().ok()?;
+
+    // Convert SystemTime to DateTime<Utc>
+    let datetime: chrono::DateTime<chrono::Utc> = modified.into();
+    Some(datetime.to_rfc3339())
+}
+
+/// Check if a session is cached in the database with a matching file mtime
+///
+/// This checks:
+/// 1. If the session exists in the database
+/// 2. If the stored file_mtime matches the current file's modification time
+///
+/// Returns Some(true) if cache is valid, Some(false) if needs re-parsing, None on error
+fn is_db_cache_valid(state: &AppState, session_id: &str, file_path: &Path) -> Option<bool> {
+    // Get current file mtime
+    let current_mtime = get_file_mtime(file_path)?;
+
+    // Check database using with_connection pattern
+    let db_lock = state.db.lock().ok()?;
+    let db = db_lock.as_ref()?;
+
+    match db.with_connection(|conn| {
+        db::queries::is_session_cache_valid(conn, session_id, &current_mtime)
+    }) {
+        Ok(valid) => Some(valid),
+        Err(e) => {
+            tracing::warn!("Error checking DB cache for session {}: {:?}", session_id, e);
+            Some(false) // Treat errors as cache miss
+        }
+    }
+}
+
 /// Get cached session list, refreshing if stale
 fn get_cached_session_list() -> Vec<SessionFileInfo> {
     // Check if cache is valid
@@ -409,11 +449,19 @@ fn init_database(state: &AppState) -> Result<(), CommandError> {
 }
 
 /// Parse a session and get its turns, using cache when available
+///
+/// Cache check priority:
+/// 1. In-memory cache (fast, per-process)
+/// 2. Database cache (persistent, checks file mtime)
+/// 3. Parse from JSONL file (slowest, but always accurate)
+///
+/// Note: Database cache check requires AppState for DB access.
+/// Use `get_session_turns_with_db_cache` when AppState is available.
 fn get_session_turns(session_id: &str) -> Result<(Vec<CompletedTurn>, SessionFileInfo), CommandError> {
     let file_info = find_session_by_id(session_id)
         .ok_or_else(|| CommandError::SessionNotFound(session_id.to_string()))?;
 
-    // Try cache first
+    // Try in-memory cache first
     if let Some(cached_turns) = get_cached_session(session_id, &file_info) {
         return Ok((cached_turns, file_info));
     }
@@ -422,10 +470,67 @@ fn get_session_turns(session_id: &str) -> Result<(Vec<CompletedTurn>, SessionFil
     let (turns, _stats) = parse_session_by_id(session_id)
         .map_err(|e| CommandError::Internal(e.to_string()))?;
 
-    // Cache the result
+    // Cache the result in memory
     cache_session(session_id, &file_info, turns.clone());
 
     Ok((turns, file_info))
+}
+
+/// Parse a session and get its turns, checking database cache first
+///
+/// This version checks the database cache before parsing:
+/// 1. In-memory cache (fast, per-process)
+/// 2. Database cache with file mtime check (persistent across restarts)
+/// 3. Parse from JSONL file (if cache miss or mtime changed)
+///
+/// Returns:
+/// - `needs_db_store = true` if the session was parsed and should be stored to DB
+/// - `needs_db_store = false` if data came from cache
+fn get_session_turns_with_db_cache(
+    session_id: &str,
+    state: &AppState,
+) -> Result<(Vec<CompletedTurn>, SessionFileInfo, bool), CommandError> {
+    let file_info = find_session_by_id(session_id)
+        .ok_or_else(|| CommandError::SessionNotFound(session_id.to_string()))?;
+
+    // 1. Try in-memory cache first (fastest)
+    if let Some(cached_turns) = get_cached_session(session_id, &file_info) {
+        tracing::trace!("Session {} found in memory cache", session_id);
+        return Ok((cached_turns, file_info, false)); // No need to store, already cached
+    }
+
+    // 2. Check database cache with file mtime validation
+    if let Some(true) = is_db_cache_valid(state, session_id, &file_info.path) {
+        tracing::debug!("Session {} has valid DB cache (mtime match), skipping parse", session_id);
+        // DB cache is valid - the data is already in the database
+        // We still need to parse to get the turns for this request,
+        // but we know the DB data is up to date, so no need to re-store
+        //
+        // Note: This optimization helps when multiple processes/restarts occur.
+        // The in-memory cache gets this data after parsing once.
+        let (turns, _stats) = parse_session_by_id(session_id)
+            .map_err(|e| CommandError::Internal(e.to_string()))?;
+
+        // Cache in memory for subsequent requests
+        cache_session(session_id, &file_info, turns.clone());
+
+        return Ok((turns, file_info, false)); // DB already has current data
+    }
+
+    tracing::debug!(
+        "Session {} cache miss (not in memory, DB cache invalid/missing), parsing JSONL",
+        session_id
+    );
+
+    // 3. Parse the session (cache miss or mtime mismatch)
+    let (turns, _stats) = parse_session_by_id(session_id)
+        .map_err(|e| CommandError::Internal(e.to_string()))?;
+
+    // Cache the result in memory
+    cache_session(session_id, &file_info, turns.clone());
+
+    // Signal that this session needs to be stored to DB (Task 48 handles this)
+    Ok((turns, file_info, true))
 }
 
 /// Calculate metrics from parsed turns
@@ -790,49 +895,206 @@ pub async fn scan_new_sessions(
     Ok(summaries)
 }
 
-/// Preload all sessions into cache at startup
+/// Load all cached sessions from the database
+/// Returns a HashMap keyed by session_id for fast lookup
+fn load_cached_sessions_from_db(state: &AppState) -> HashMap<String, db::queries::CachedSessionData> {
+    let db_lock = match state.db.lock() {
+        Ok(lock) => lock,
+        Err(_) => {
+            tracing::warn!("Failed to acquire DB lock for loading cached sessions");
+            return HashMap::new();
+        }
+    };
+
+    let db = match db_lock.as_ref() {
+        Some(db) => db,
+        None => {
+            tracing::debug!("DB not initialized, skipping cache load");
+            return HashMap::new();
+        }
+    };
+
+    match db.with_connection(|conn| db::queries::get_all_sessions_with_mtime(conn)) {
+        Ok(sessions) => sessions,
+        Err(e) => {
+            tracing::warn!("Failed to load sessions from DB: {:?}", e);
+            HashMap::new()
+        }
+    }
+}
+
+/// Store a session and its metrics to the database for persistent caching
+fn store_session_to_db(
+    state: &AppState,
+    _file_info: &SessionFileInfo,  // Reserved for future use (e.g., git branch extraction)
+    summary: &SessionSummary,
+    file_mtime: &str,
+) {
+    let db_lock = match state.db.lock() {
+        Ok(lock) => lock,
+        Err(_) => {
+            tracing::warn!("Failed to acquire DB lock for storing session {}", summary.id);
+            return;
+        }
+    };
+
+    let db = match db_lock.as_ref() {
+        Some(db) => db,
+        None => {
+            tracing::debug!("DB not initialized, skipping session store");
+            return;
+        }
+    };
+
+    // Store session with mtime
+    if let Err(e) = db.with_connection(|conn| {
+        db::queries::upsert_session_with_mtime(
+            conn,
+            &summary.id,
+            &summary.project_path,
+            &summary.project_name,
+            None, // branch - could be extracted from git info
+            &summary.started_at,
+            summary.last_activity_at.as_deref().unwrap_or(&summary.started_at),
+            summary.model.as_deref().unwrap_or("unknown"),
+            false, // is_active
+            &summary.file_path,
+            file_mtime,
+        )?;
+
+        // Store metrics - estimate input/output split as 60/40
+        let input_tokens = (summary.total_tokens as f64 * 0.6) as u64;
+        let output_tokens = summary.total_tokens - input_tokens;
+
+        db::queries::upsert_session_metrics(
+            conn,
+            &summary.id,
+            summary.total_turns,
+            summary.duration_ms,
+            summary.total_cost,
+            input_tokens,
+            output_tokens,
+            0, // cache_read - would need detailed turn data
+            0, // cache_write
+            0.0, // efficiency_score
+            0.0, // cache_hit_rate
+            0.0, // peak_context_pct
+        )
+    }) {
+        tracing::warn!("Failed to store session {} to DB: {:?}", summary.id, e);
+    }
+}
+
+/// Convert DB cached session data to the SessionSummary format used by commands
+fn convert_db_cache_to_summary(
+    cached: &db::queries::CachedSessionData,
+    file_info: &SessionFileInfo,
+) -> SessionSummary {
+    SessionSummary {
+        id: cached.session_id.clone(),
+        project_path: cached.project_path.clone(),
+        project_name: cached.project_name.clone(),
+        started_at: cached.started_at.clone(),
+        last_activity_at: cached.last_activity_at.clone(),
+        model: cached.model.clone(),
+        total_cost: cached.total_cost,
+        total_turns: cached.total_turns,
+        total_tokens: cached.total_tokens,
+        duration_ms: cached.total_duration_ms,
+        // Use file_info for current file state (subagent status and path)
+        is_subagent: file_info.is_subagent,
+        file_path: file_info.path.to_string_lossy().to_string(),
+    }
+}
+
+/// Preload all sessions into cache at startup with persistent DB caching
+///
+/// On first run: Parses all sessions from JSONL files, stores to SQLite DB
+/// On subsequent runs: Loads from DB (fast), only re-parses if file mtime changed
+///
 /// Returns the count of sessions loaded
 #[tauri::command]
-pub async fn preload_all_sessions() -> Result<u32, CommandError> {
+pub async fn preload_all_sessions(
+    state: tauri::State<'_, AppState>,
+) -> Result<u32, CommandError> {
     if SESSIONS_PRELOADED.load(Ordering::SeqCst) {
         // Already preloaded, return current count
         let sessions = get_cached_session_list();
         return Ok(sessions.len() as u32);
     }
 
-    tracing::info!("Preloading all sessions into cache...");
+    tracing::info!("Preloading all sessions with persistent DB caching...");
     let start = Instant::now();
 
-    // Scan for sessions
-    let sessions = scan_claude_sessions();
-    let count = sessions.len();
+    // Step 1: Load all cached sessions from DB (fast)
+    let db_cached_sessions = load_cached_sessions_from_db(&state);
+    tracing::info!("Loaded {} sessions from DB cache", db_cached_sessions.len());
 
-    // Precompute summaries for all sessions (or just the most recent ones)
-    let preload_limit = 500; // Preload up to 500 most recent sessions
-    let preload_count = std::cmp::min(preload_limit, sessions.len());
+    // Step 2: Scan filesystem for all session files
+    let file_sessions = scan_claude_sessions();
+    let total_count = file_sessions.len();
+    tracing::info!("Found {} session files on disk", total_count);
 
     // Update the session list cache first
     if let Ok(mut cache) = SESSION_LIST_CACHE.write() {
-        cache.sessions = sessions;
+        cache.sessions = file_sessions.clone();
         cache.last_refresh = Instant::now();
     }
 
-    // Now compute and cache summaries from the cached list
-    let cached_sessions = get_cached_session_list();
-    for session in cached_sessions.iter().take(preload_limit) {
-        let _ = get_cached_summary(session);
+    // Step 3: For each session, check DB cache validity and load/parse as needed
+    let mut cache_hits = 0;
+    let mut cache_misses = 0;
+    let preload_limit = 500; // Preload up to 500 most recent sessions
+
+    for session in file_sessions.iter().take(preload_limit) {
+        let current_mtime = get_file_mtime(&session.path);
+
+        // Check if DB has valid cached data
+        if let Some(cached) = db_cached_sessions.get(&session.session_id) {
+            let mtime_matches = match (&cached.file_mtime, &current_mtime) {
+                (Some(stored), Some(current)) => stored == current,
+                _ => false,
+            };
+
+            if mtime_matches {
+                // Cache hit - use DB data directly without parsing
+                cache_hits += 1;
+
+                // Convert DB cache to our SessionSummary format and cache in memory
+                let summary = convert_db_cache_to_summary(cached, session);
+                if let Ok(mut list_cache) = SESSION_LIST_CACHE.write() {
+                    list_cache.summaries.insert(session.session_id.clone(), summary);
+                }
+                continue;
+            }
+        }
+
+        // Cache miss or stale - parse JSONL and store to DB
+        cache_misses += 1;
+        let summary = compute_session_summary(session);
+
+        // Store to DB for next startup
+        if let Some(ref mtime) = current_mtime {
+            store_session_to_db(&state, session, &summary, mtime);
+        }
+
+        // Cache in memory
+        if let Ok(mut list_cache) = SESSION_LIST_CACHE.write() {
+            list_cache.summaries.insert(session.session_id.clone(), summary);
+        }
     }
 
     SESSIONS_PRELOADED.store(true, Ordering::SeqCst);
     let elapsed = start.elapsed();
     tracing::info!(
-        "Preloaded {} sessions ({} cached summaries) in {:?}",
-        count,
-        preload_count,
+        "Preloaded {} sessions (DB cache hits: {}, misses: {}) in {:?}",
+        total_count,
+        cache_hits,
+        cache_misses,
         elapsed
     );
 
-    Ok(count as u32)
+    Ok(total_count as u32)
 }
 
 /// Get sessions filtered by date range efficiently
@@ -1392,8 +1654,8 @@ pub async fn export_trends(
 // Trend Commands
 // ============================================================================
 
-use crate::trends::{DailyTrend, TrendSummary, Granularity};
-use crate::trends::daily::{SessionData, calculate_trend_summary, get_daily_trends};
+use crate::trends::DailyTrend;
+use crate::trends::daily::{SessionData, get_daily_trends};
 
 /// Helper to convert sessions to trend data using cached session list
 fn collect_session_trend_data() -> Vec<SessionData> {
@@ -1443,28 +1705,33 @@ fn collect_session_trend_data() -> Vec<SessionData> {
 
 /// Get historical trends with optional date range and granularity
 ///
-/// Returns aggregated session data with period-over-period comparisons.
+/// Returns daily trend data for chart visualization.
 #[tauri::command]
 pub async fn get_trends(
     _state: tauri::State<'_, AppState>,
     start_date: Option<String>,
     end_date: Option<String>,
-    granularity: Option<String>,
-) -> Result<TrendSummary, String> {
+    _granularity: Option<String>,
+) -> Result<Vec<DailyTrend>, String> {
     let session_data = collect_session_trend_data();
-    let days = 30u32; // Default to 30 days if no date range specified
 
-    let summary = calculate_trend_summary(
-        &session_data,
-        start_date.as_deref(),
-        end_date.as_deref(),
-        days,
-    );
+    // Calculate days from date range, default to 30
+    let days = if let (Some(start), Some(end)) = (&start_date, &end_date) {
+        if let (Ok(start_dt), Ok(end_dt)) = (
+            chrono::NaiveDate::parse_from_str(start, "%Y-%m-%d"),
+            chrono::NaiveDate::parse_from_str(end, "%Y-%m-%d"),
+        ) {
+            (end_dt - start_dt).num_days().max(1) as u32
+        } else {
+            30
+        }
+    } else {
+        30
+    };
 
-    // Apply granularity transformation if needed
-    let _granularity = Granularity::from(granularity);
+    let daily = get_daily_trends(&session_data, days, start_date.as_deref(), end_date.as_deref());
 
-    Ok(summary)
+    Ok(daily)
 }
 
 /// Get cost trend for the last N days

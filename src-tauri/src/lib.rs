@@ -77,6 +77,37 @@ pub fn run() {
         .init();
 
     tracing::info!("Starting Claude Code Analytics backend");
+
+    // Initialize database before session scan
+    let db_path = db::default_db_path();
+    tracing::info!("Database path: {:?}", db_path);
+
+    // Create database directory if it doesn't exist
+    if let Some(parent) = db_path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            tracing::error!("Failed to create database directory: {}", e);
+        }
+    }
+
+    // Create and initialize the database
+    let app_state = match db::Database::new(db_path.clone()) {
+        Ok(database) => {
+            if let Err(e) = database.initialize() {
+                tracing::error!("Failed to initialize database schema: {}", e);
+                AppState::default()
+            } else {
+                tracing::info!("Database initialized successfully at {:?}", db_path);
+                AppState {
+                    db: Mutex::new(Some(database)),
+                }
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to create database connection: {}", e);
+            AppState::default()
+        }
+    };
+
     tracing::info!("Scanning for sessions in ~/.claude/projects/");
 
     // Do initial session scan on startup
@@ -84,7 +115,7 @@ pub fn run() {
     tracing::info!("Found {} session files", session_count);
 
     tauri::Builder::default()
-        .manage(AppState::default())
+        .manage(app_state)
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![

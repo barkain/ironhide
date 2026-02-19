@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     model TEXT NOT NULL,
     is_active INTEGER DEFAULT 1,
     file_path TEXT NOT NULL,
+    file_mtime TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );

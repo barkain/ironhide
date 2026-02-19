@@ -20,6 +20,7 @@
     "tauri:build:debug": "tauri build --debug"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.1",
     "@tailwindcss/postcss": "^4.1.18",
     "@tauri-apps/cli": "^2.10.0",
     "@types/d3-sankey": "^0.12.5",
