@@ -44,9 +44,9 @@ impl SessionMetrics {
         }
     }
 
-    /// Total tokens (input + output)
+    /// Total tokens (input + output + cache read + cache write)
     pub fn total_tokens(&self) -> i64 {
-        self.total_input_tokens + self.total_output_tokens
+        self.total_input_tokens + self.total_output_tokens + self.total_cache_read + self.total_cache_write
     }
 
     /// Calculate cache hit rate

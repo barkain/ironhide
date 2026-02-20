@@ -48,9 +48,10 @@ Thumbs.db
 .eslintcache
 .turbo/
 
-# Test coverage
+# Test coverage & results
 coverage/
 .nyc_output/
+test-results/
 
 # Temp files
 tmp/

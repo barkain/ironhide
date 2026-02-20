@@ -1,13 +1,13 @@
 {
-  "name": "claude-analytics",
+  "name": "ironhide",
   "private": true,
   "version": "0.2.0",
-  "description": "Claude Code Analytics Dashboard - Analyze Claude Code sessions with deep insights, metrics, and recommendations",
-  "author": "Claude Analytics Contributors",
+  "description": "Ironhide - Analyze Claude Code sessions with deep insights, metrics, and recommendations",
+  "author": "Ironhide Contributors",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/YOUR_USERNAME/claude-code-analytics-dashboard"
+    "url": "https://github.com/YOUR_USERNAME/ironhide"
   },
   "type": "module",
   "scripts": {

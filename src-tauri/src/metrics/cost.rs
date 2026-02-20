@@ -119,6 +119,36 @@ pub fn get_default_pricing() -> Vec<ModelPricing> {
             cache_read_per_million: 0.10,
             max_context_tokens: Some(200000),
         },
+        ModelPricing {
+            model_id: "claude-opus-4-6-20260219".to_string(),
+            display_name: "Claude Opus 4.6".to_string(),
+            input_price_per_million: 5.00,
+            output_price_per_million: 25.00,
+            cache_write_5m_per_million: 6.25,
+            cache_write_1h_per_million: 10.00,
+            cache_read_per_million: 0.50,
+            max_context_tokens: Some(200000),
+        },
+        ModelPricing {
+            model_id: "claude-sonnet-4-6-20260219".to_string(),
+            display_name: "Claude Sonnet 4.6".to_string(),
+            input_price_per_million: 3.00,
+            output_price_per_million: 15.00,
+            cache_write_5m_per_million: 3.75,
+            cache_write_1h_per_million: 6.00,
+            cache_read_per_million: 0.30,
+            max_context_tokens: Some(200000),
+        },
+        ModelPricing {
+            model_id: "claude-sonnet-4-20250514".to_string(),
+            display_name: "Claude Sonnet 4".to_string(),
+            input_price_per_million: 3.00,
+            output_price_per_million: 15.00,
+            cache_write_5m_per_million: 3.75,
+            cache_write_1h_per_million: 6.00,
+            cache_read_per_million: 0.30,
+            max_context_tokens: Some(200000),
+        },
     ]
 }
 

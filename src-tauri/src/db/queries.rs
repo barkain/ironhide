@@ -49,7 +49,7 @@ pub fn get_sessions(
             s.is_active,
             COALESCE(m.total_turns, 0) as total_turns,
             COALESCE(m.total_cost, 0.0) as total_cost,
-            COALESCE(m.total_input_tokens + m.total_output_tokens, 0) as total_tokens
+            COALESCE(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write, 0) as total_tokens
         FROM sessions s
         LEFT JOIN session_metrics m ON s.session_id = m.session_id
         ORDER BY s.last_activity_at DESC
@@ -317,7 +317,7 @@ pub fn upsert_session_metrics(
         0.0
     };
     let avg_tokens_per_turn = if total_turns > 0 {
-        (total_input_tokens + total_output_tokens) as f64 / total_turns as f64
+        (total_input_tokens + total_output_tokens + total_cache_read + total_cache_write) as f64 / total_turns as f64
     } else {
         0.0
     };
@@ -380,7 +380,7 @@ pub fn get_all_cached_sessions(conn: &Connection) -> Result<Vec<SessionSummary>,
             s.is_active,
             COALESCE(m.total_turns, 0) as total_turns,
             COALESCE(m.total_cost, 0.0) as total_cost,
-            COALESCE(m.total_input_tokens + m.total_output_tokens, 0) as total_tokens
+            COALESCE(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write, 0) as total_tokens
         FROM sessions s
         LEFT JOIN session_metrics m ON s.session_id = m.session_id
         ORDER BY s.last_activity_at DESC
@@ -476,7 +476,7 @@ pub fn get_all_sessions_with_mtime(
             s.file_mtime,
             COALESCE(m.total_turns, 0) as total_turns,
             COALESCE(m.total_cost, 0.0) as total_cost,
-            COALESCE(m.total_input_tokens + m.total_output_tokens, 0) as total_tokens,
+            COALESCE(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write, 0) as total_tokens,
             COALESCE(m.total_duration_ms, 0) as total_duration_ms
         FROM sessions s
         LEFT JOIN session_metrics m ON s.session_id = m.session_id

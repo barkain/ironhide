@@ -25,6 +25,9 @@ pub enum DbError {
 
     #[error("Migration failed: {0}")]
     Migration(String),
+
+    #[error("Lock poisoned")]
+    LockPoisoned,
 }
 
 /// Database connection wrapper
@@ -49,7 +52,7 @@ impl Database {
 
     /// Initialize the database schema
     pub fn initialize(&self) -> Result<(), DbError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|_| DbError::LockPoisoned)?;
         schema::create_tables(&conn)?;
         schema::insert_default_pricing(&conn)?;
         Ok(())
@@ -65,7 +68,7 @@ impl Database {
     where
         F: FnOnce(&Connection) -> Result<T, DbError>,
     {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|_| DbError::LockPoisoned)?;
         f(&conn)
     }
 }
@@ -75,5 +78,5 @@ pub fn default_db_path() -> PathBuf {
     let data_dir = dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."));
 
-    data_dir.join("claude-analytics").join("analytics.db")
+    data_dir.join("ironhide").join("analytics.db")
 }

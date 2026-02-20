@@ -1,11 +1,12 @@
 import { useState, useMemo } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Header } from '../components/layout/Header';
 import { Card, CardContent } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { ExportButton } from '../components/export';
-import { useSessions, useSessionUpdates } from '../hooks/useSessions';
+import { useSessionsByProject, useSessionUpdates } from '../hooks/useSessions';
+import { useProjectMetrics } from '../hooks/useMetrics';
 import { useAppStore } from '../lib/store';
 import {
   formatCurrency,
@@ -13,6 +14,7 @@ import {
   formatRelativeTime,
   formatDuration,
   formatCompactNumber,
+  getProjectDisplayName,
   cn,
 } from '../lib/utils';
 import {
@@ -27,6 +29,8 @@ import {
   GitCompare,
   Check,
   X,
+  ArrowLeft,
+  FolderOpen,
 } from 'lucide-react';
 import type { SessionSummary } from '../types';
 
@@ -34,6 +38,9 @@ type SortField = 'date' | 'cost' | 'tokens' | 'turns';
 type SortDirection = 'asc' | 'desc';
 
 function Sessions() {
+  const { projectPath: encodedProjectPath } = useParams<{ projectPath: string }>();
+  const projectPath = encodedProjectPath ? decodeURIComponent(encodedProjectPath) : null;
+
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('date');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
@@ -42,21 +49,34 @@ function Sessions() {
   // Subscribe to real-time updates
   useSessionUpdates();
 
-  const { data: sessions, isLoading } = useSessions(100, 0);
+  const { data: sessions, isLoading } = useSessionsByProject(projectPath);
+  const { data: projectMetrics } = useProjectMetrics();
   const { selectedForComparison, toggleSessionComparison, clearComparison } = useAppStore();
 
   const canCompare = selectedForComparison.length >= 2;
   const maxSelected = selectedForComparison.length >= 3;
+
+  // Find the current project's metrics
+  const currentProject = useMemo(() => {
+    if (!projectMetrics || !projectPath) return null;
+    return projectMetrics.find((p) => p.project_path === projectPath) ?? null;
+  }, [projectMetrics, projectPath]);
+
+  // Derive disambiguated project name from path or metrics
+  const projectName = projectPath
+    ? getProjectDisplayName(projectPath)
+    : currentProject?.project_name ?? 'Unknown';
 
   // Filter and sort sessions
   const filteredSessions = useMemo(() => {
     if (!sessions) return [];
 
     // Filter by search query
-    let filtered = sessions.filter((session) =>
-      session.project_path.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      session.project_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (session.model && session.model.toLowerCase().includes(searchQuery.toLowerCase()))
+    let filtered = sessions.filter(
+      (session) =>
+        session.project_path.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        session.project_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (session.model && session.model.toLowerCase().includes(searchQuery.toLowerCase()))
     );
 
     // Sort
@@ -103,20 +123,73 @@ function Sessions() {
       }`}
     >
       {label}
-      {sortField === field && (
-        sortDirection === 'asc' ? <SortAsc className="h-3 w-3" /> : <SortDesc className="h-3 w-3" />
-      )}
+      {sortField === field &&
+        (sortDirection === 'asc' ? (
+          <SortAsc className="h-3 w-3" />
+        ) : (
+          <SortDesc className="h-3 w-3" />
+        ))}
     </button>
   );
 
   return (
     <div className="flex flex-col">
-      <Header
-        title="Sessions"
-        subtitle="Browse and analyze your Claude Code sessions"
-      />
+      <Header title={projectName} subtitle={projectPath ?? 'Project sessions'} />
 
       <div className="flex-1 p-6">
+        {/* Back to projects + project header */}
+        <div className="mb-6">
+          <Link
+            to="/sessions"
+            className="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-white transition-colors mb-4"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Projects
+          </Link>
+
+          {/* Project aggregate metrics */}
+          {currentProject && (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 mb-6">
+              <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                <div className="flex items-center gap-2 text-gray-400 mb-1">
+                  <FolderOpen className="h-4 w-4" />
+                  <span className="text-sm">Sessions</span>
+                </div>
+                <p className="text-xl font-semibold text-white">
+                  {formatNumber(currentProject.session_count)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                <div className="flex items-center gap-2 text-gray-400 mb-1">
+                  <DollarSign className="h-4 w-4" />
+                  <span className="text-sm">Total Cost</span>
+                </div>
+                <p className="text-xl font-semibold text-white">
+                  {formatCurrency(currentProject.total_cost)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                <div className="flex items-center gap-2 text-gray-400 mb-1">
+                  <Zap className="h-4 w-4" />
+                  <span className="text-sm">Total Tokens</span>
+                </div>
+                <p className="text-xl font-semibold text-white">
+                  {formatCompactNumber(currentProject.total_tokens)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                <div className="flex items-center gap-2 text-gray-400 mb-1">
+                  <MessageSquare className="h-4 w-4" />
+                  <span className="text-sm">Total Turns</span>
+                </div>
+                <p className="text-xl font-semibold text-white">
+                  {formatNumber(currentProject.total_turns)}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Comparison selection banner */}
         {selectedForComparison.length > 0 && (
           <div className="mb-4 flex items-center justify-between rounded-lg border border-[var(--color-primary-500)]/30 bg-[var(--color-primary-600)]/10 px-4 py-3">
@@ -126,17 +199,11 @@ function Sessions() {
                 <span className="font-semibold">{selectedForComparison.length}</span>
                 {' session'}
                 {selectedForComparison.length !== 1 ? 's' : ''} selected for comparison
-                {maxSelected && (
-                  <span className="ml-2 text-amber-400">(max 3)</span>
-                )}
+                {maxSelected && <span className="ml-2 text-amber-400">(max 3)</span>}
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={clearComparison}
-              >
+              <Button variant="ghost" size="sm" onClick={clearComparison}>
                 <X className="h-4 w-4 mr-1" />
                 Clear
               </Button>
@@ -159,7 +226,7 @@ function Sessions() {
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
-              placeholder="Search sessions by project or model..."
+              placeholder="Search sessions by model..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] py-2 pl-10 pr-4 text-sm text-white placeholder-gray-500 focus:border-[var(--color-primary-500)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary-500)]"
@@ -175,7 +242,9 @@ function Sessions() {
               <SortButton field="turns" label="Turns" />
             </div>
             <ExportButton
-              sessionIds={selectedForComparison.length > 0 ? selectedForComparison : undefined}
+              sessionIds={
+                selectedForComparison.length > 0 ? selectedForComparison : undefined
+              }
               mode="sessions"
             />
           </div>
@@ -184,7 +253,8 @@ function Sessions() {
         {/* Session count */}
         {!isLoading && filteredSessions.length > 0 && (
           <p className="mb-4 text-sm text-gray-500">
-            Showing {filteredSessions.length} session{filteredSessions.length !== 1 ? 's' : ''}
+            Showing {filteredSessions.length} session
+            {filteredSessions.length !== 1 ? 's' : ''}
             {searchQuery && ` matching "${searchQuery}"`}
           </p>
         )}
@@ -207,7 +277,9 @@ function Sessions() {
               <MessageSquare className="h-12 w-12 text-gray-600" />
               <p className="mt-4 text-lg font-medium text-gray-400">No sessions found</p>
               <p className="mt-1 text-sm text-gray-500">
-                {searchQuery ? 'Try a different search term' : 'Sessions will appear here once you use Claude Code'}
+                {searchQuery
+                  ? 'Try a different search term'
+                  : 'Sessions will appear here once you use Claude Code in this project'}
               </p>
             </CardContent>
           </Card>
@@ -251,7 +323,8 @@ function SessionCard({ session, isSelected, onToggleSelect, canSelect }: Session
         <Card
           className={cn(
             'transition-colors hover:bg-gray-800/50',
-            isSelected && 'ring-2 ring-[var(--color-primary-500)] bg-[var(--color-primary-600)]/5'
+            isSelected &&
+              'ring-2 ring-[var(--color-primary-500)] bg-[var(--color-primary-600)]/5'
           )}
         >
           <CardContent className="flex items-center justify-between">
@@ -263,15 +336,15 @@ function SessionCard({ session, isSelected, onToggleSelect, canSelect }: Session
                 isSelected
                   ? 'border-[var(--color-primary-500)] bg-[var(--color-primary-500)] text-white'
                   : canSelect
-                  ? 'border-gray-600 hover:border-[var(--color-primary-400)] hover:bg-gray-800'
-                  : 'border-gray-700 text-gray-700 cursor-not-allowed opacity-50'
+                    ? 'border-gray-600 hover:border-[var(--color-primary-400)] hover:bg-gray-800'
+                    : 'border-gray-700 text-gray-700 cursor-not-allowed opacity-50'
               )}
               title={
                 isSelected
                   ? 'Remove from comparison'
                   : canSelect
-                  ? 'Add to comparison'
-                  : 'Maximum 3 sessions for comparison'
+                    ? 'Add to comparison'
+                    : 'Maximum 3 sessions for comparison'
               }
             >
               {isSelected && <Check className="h-3 w-3" />}
@@ -279,15 +352,11 @@ function SessionCard({ session, isSelected, onToggleSelect, canSelect }: Session
 
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3">
-                <h3 className="font-medium text-white truncate">
-                  {session.project_name}
+                <h3 className="font-medium text-white truncate" title={session.project_path}>
+                  {getProjectDisplayName(session.project_path)}
                 </h3>
-                {session.model && (
-                  <Badge variant="info">{session.model}</Badge>
-                )}
-                {session.is_subagent && (
-                  <Badge variant="warning">Subagent</Badge>
-                )}
+                {session.model && <Badge variant="info">{session.model}</Badge>}
+                {session.is_subagent && <Badge variant="warning">Subagent</Badge>}
               </div>
               <p className="mt-1 text-sm text-gray-500 truncate max-w-md">
                 {session.project_path}

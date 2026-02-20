@@ -48,7 +48,7 @@ export function InsightsPanel({ sessionId, className }: InsightsPanelProps) {
       ]);
 
       setPatterns(patternsData);
-      setRecommendations(recsData);
+      setRecommendations(recsData.recommendations);
     } catch (err) {
       console.error('Failed to load insights:', err);
       setError('Failed to load insights data');

@@ -145,7 +145,8 @@ impl PartialTurn {
             Some(self.assistant_messages.join("\n"))
         };
 
-        let total_tokens = self.input_tokens + self.output_tokens;
+        let total_tokens = self.input_tokens + self.output_tokens + self.cache_read_tokens
+            + self.cache_write_5m_tokens + self.cache_write_1h_tokens;
         let total_context = self.input_tokens
             + self.cache_read_tokens
             + self.cache_write_5m_tokens
@@ -732,7 +733,7 @@ mod tests {
                 cache_read_tokens: 1000,
                 cache_write_5m_tokens: 500,
                 cache_write_1h_tokens: 0,
-                total_tokens: 150,
+                total_tokens: 1650,
                 total_context: 1600,
                 tool_uses: vec![ToolUse {
                     id: "t1".to_string(),
@@ -762,7 +763,7 @@ mod tests {
                 cache_read_tokens: 2000,
                 cache_write_5m_tokens: 0,
                 cache_write_1h_tokens: 300,
-                total_tokens: 300,
+                total_tokens: 2600,
                 total_context: 2500,
                 tool_uses: vec![
                     ToolUse {

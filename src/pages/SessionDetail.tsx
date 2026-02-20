@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, Suspense } from 'react';
-import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { Header } from '../components/layout/Header';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
@@ -8,6 +8,7 @@ import { DrillDownBreadcrumb } from '../components/navigation/DrillDownBreadcrum
 import { VirtualizedTurnTable } from '../components/turns/VirtualizedTurnTable';
 import { TurnDetailView } from '../components/turns/TurnDetailView';
 import { ComponentLoadingSpinner } from '../components/ui/PageLoadingSpinner';
+import { Button } from '../components/ui/Button';
 import type { ToolUsageData } from '../components/charts/ToolUsagePieChart';
 import { useSession, useTurns } from '../hooks/useSessions';
 
@@ -25,9 +26,11 @@ import {
   formatDateTime,
   formatDuration,
   formatCompactNumber,
+  getProjectDisplayName,
   cn,
 } from '../lib/utils';
 import {
+  ArrowLeft,
   Clock,
   MessageSquare,
   DollarSign,
@@ -72,6 +75,7 @@ const TABS: TabConfig[] = [
 
 function SessionDetail() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const { data: session, isLoading: sessionLoading } = useSession(id || null);
@@ -115,7 +119,7 @@ function SessionDetail() {
     // Subagent data aggregation
     const subagentMap = new Map<string, SubagentSummary>();
     turns
-      .filter((turn) => turn.is_subagent)
+      .filter((turn) => turn.has_subagents)
       .forEach((turn) => {
         const agentId = turn.model || 'unknown-agent';
         const existing = subagentMap.get(agentId);
@@ -180,6 +184,15 @@ function SessionDetail() {
       <div className="flex flex-col">
         <Header title="Session Details" />
         <div className="flex-1 p-6">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate('/sessions')}
+            className="gap-1.5 mb-4"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Sessions
+          </Button>
           <LoadingState />
         </div>
       </div>
@@ -192,6 +205,15 @@ function SessionDetail() {
       <div className="flex flex-col">
         <Header title="Session Not Found" />
         <div className="flex-1 p-6">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate('/sessions')}
+            className="gap-1.5 mb-4"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Sessions
+          </Button>
           <NotFoundState />
         </div>
       </div>
@@ -202,9 +224,20 @@ function SessionDetail() {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <Header title={session.project_name} subtitle={session.project_path} />
+      <Header title={getProjectDisplayName(session.project_path)} subtitle={session.project_path} />
 
       <div className="flex-1 p-6 space-y-6">
+        {/* Back button */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => navigate('/sessions')}
+          className="gap-1.5"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to Sessions
+        </Button>
+
         {/* Breadcrumb navigation */}
         <DrillDownBreadcrumb />
 
@@ -399,7 +432,7 @@ function OverviewTab({ metrics, session, turns, turnsLoading }: OverviewTabProps
       {/* Efficiency and Cost charts */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <EfficiencyGauge
-          value={metrics.efficiency.oes_score}
+          value={metrics.efficiency.oes_score * 100}
           label="Efficiency Score"
           description={`Grade: ${metrics.efficiency.oes_grade}`}
         />

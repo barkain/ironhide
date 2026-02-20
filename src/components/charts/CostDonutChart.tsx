@@ -253,7 +253,7 @@ export function CostDonutChart({ cost, isLoading }: CostDonutChartProps) {
                   style={{ backgroundColor: entry.color }}
                 />
                 <span className="text-gray-400">
-                  {entry.name}: {percentage}%
+                  {entry.name}: {formatCurrency(entry.value)} ({percentage}%)
                 </span>
               </div>
             );

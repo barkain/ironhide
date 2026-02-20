@@ -35,7 +35,8 @@ function normalize(value: number, min: number, max: number): number {
 
 /**
  * Prepares radar chart data from efficiency metrics
- * All values are normalized to 0-1 scale for the radar chart
+ * All values are normalized to 0-1 scale for the radar chart.
+ * When no subagents are present, the Subagent axis is omitted entirely.
  */
 function prepareRadarData(efficiency: EfficiencyMetrics): RadarDataPoint[] {
   // Cost Efficiency: Lower CPDU is better, so we invert (1 - normalized)
@@ -50,17 +51,11 @@ function prepareRadarData(efficiency: EfficiencyMetrics): RadarDataPoint[] {
   // Higher is better
   const cacheEfficiency = normalize(efficiency.cer, 0, 1);
 
-  // Subagent Efficiency: SEI normalized to 0-1
-  // Higher is better, null means no subagents (show as neutral 0.5)
-  const subagentEfficiency = efficiency.sei !== null
-    ? normalize(efficiency.sei, 0, 1)
-    : 0.5;
-
   // Workflow Smoothness: WFS is friction, lower is better
   // So we use 1 - WFS (normalized)
   const workflowSmoothness = 1 - normalize(efficiency.wfs, 0, 1);
 
-  return [
+  const data: RadarDataPoint[] = [
     {
       metric: 'Cost',
       fullMetric: 'Cost Efficiency',
@@ -86,16 +81,6 @@ function prepareRadarData(efficiency: EfficiencyMetrics): RadarDataPoint[] {
       rawLabel: `CER: ${(efficiency.cer * 100).toFixed(1)}%`,
     },
     {
-      metric: 'Subagent',
-      fullMetric: 'Subagent Efficiency',
-      value: subagentEfficiency,
-      fullMark: 1,
-      rawValue: efficiency.sei ?? 0,
-      rawLabel: efficiency.sei !== null
-        ? `SEI: ${(efficiency.sei * 100).toFixed(1)}%`
-        : 'SEI: N/A (no subagents)',
-    },
-    {
       metric: 'Workflow',
       fullMetric: 'Workflow Smoothness',
       value: workflowSmoothness,
@@ -104,6 +89,21 @@ function prepareRadarData(efficiency: EfficiencyMetrics): RadarDataPoint[] {
       rawLabel: `WFS: ${(efficiency.wfs * 100).toFixed(1)}% friction`,
     },
   ];
+
+  // Only include Subagent axis when subagents are actually present
+  if (efficiency.sei !== null) {
+    const subagentEfficiency = normalize(efficiency.sei, 0, 1);
+    data.splice(3, 0, {
+      metric: 'Subagent',
+      fullMetric: 'Subagent Efficiency',
+      value: subagentEfficiency,
+      fullMark: 1,
+      rawValue: efficiency.sei,
+      rawLabel: `SEI: ${(efficiency.sei * 100).toFixed(1)}%`,
+    });
+  }
+
+  return data;
 }
 
 interface CustomTooltipProps {

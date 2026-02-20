@@ -1,13 +1,14 @@
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
-  History,
+  FolderOpen,
   Settings,
   ChevronLeft,
   ChevronRight,
   BarChart3,
   GitCompare,
   TrendingUp,
+  CalendarRange,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAppStore } from '../../lib/store';
@@ -24,7 +25,8 @@ export function Sidebar() {
 
   const navItems: NavItem[] = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-    { to: '/sessions', icon: History, label: 'Sessions' },
+    { to: '/sessions', icon: FolderOpen, label: 'Projects' },
+    { to: '/timeline', icon: CalendarRange, label: 'Timeline' },
     { to: '/trends', icon: TrendingUp, label: 'Trends' },
     {
       to: selectedForComparison.length > 0
@@ -51,7 +53,7 @@ export function Sidebar() {
             <BarChart3 className="h-5 w-5 text-white" />
           </div>
           {!sidebarCollapsed && (
-            <span className="font-semibold text-white">Claude Analytics</span>
+            <span className="font-semibold text-white">Ironhide</span>
           )}
         </div>
       </div>

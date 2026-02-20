@@ -1,4 +1,4 @@
-# Claude Code Analytics - Tauri Desktop Application Technical Specification
+# Ironhide - Tauri Desktop Application Technical Specification
 
 **Version:** 1.0
 **Date:** 2026-02-05
@@ -53,7 +53,7 @@ This specification defines a cross-platform desktop application for analyzing Cl
 
 ```
 +-----------------------------------------------------------------------------+
-|                        Claude Code Analytics Dashboard                       |
+|                             Ironhide Dashboard                              |
 |                              (Tauri Application)                            |
 +-----------------------------------------------------------------------------+
 |                                                                             |
@@ -479,7 +479,7 @@ src/
 
 ```
 +------------------------------------------------------------------+
-|  [Logo] Claude Code Analytics     [Search]     [Settings] [Status]|
+|  [Logo] Ironhide                  [Search]     [Settings] [Status]|
 +------------------------------------------------------------------+
 |        |                                                          |
 |  S     |  +------------------+  +------------------+              |
@@ -1233,7 +1233,7 @@ Needle: Current OES
 
 ```toml
 [package]
-name = "claude-analytics"
+name = "ironhide"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
@@ -1283,7 +1283,7 @@ tempfile = "3.10"
 
 ```json
 {
-  "name": "claude-analytics-dashboard",
+  "name": "ironhide",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -1325,7 +1325,7 @@ tempfile = "3.10"
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/core/tauri/schema.json",
-  "productName": "Claude Code Analytics",
+  "productName": "Ironhide",
   "version": "0.1.0",
   "identifier": "com.claudecode.analytics",
   "build": {
@@ -1337,7 +1337,7 @@ tempfile = "3.10"
   "app": {
     "windows": [
       {
-        "title": "Claude Code Analytics",
+        "title": "Ironhide",
         "width": 1400,
         "height": 900,
         "minWidth": 1024,

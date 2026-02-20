@@ -1,4 +1,4 @@
-import { useRef, useCallback, useState, useMemo } from 'react';
+import { useRef, useCallback, useState, useMemo, useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Badge } from '../ui/Badge';
 import { cn, formatCurrency, formatCompactNumber, formatDateTime, formatDuration, cleanMessageContent } from '../../lib/utils';
@@ -13,9 +13,12 @@ interface VirtualizedTurnTableProps {
 
 // Estimated row heights for virtual scrolling
 const ROW_HEIGHT_COLLAPSED = 72; // Base height for collapsed rows
-const ROW_HEIGHT_EXPANDED_BASE = 200; // Base height for expanded rows
 const HEADER_HEIGHT = 48;
 const CONTROLS_HEIGHT = 56;
+
+// Max heights for expanded content sections
+const USER_MESSAGE_MAX_HEIGHT = 160; // max-h-40 = 10rem = 160px
+const ASSISTANT_MESSAGE_MAX_HEIGHT = 240; // max-h-60 = 15rem = 240px
 
 type SortField = 'turn' | 'cost' | 'input' | 'output' | 'duration';
 type SortDirection = 'asc' | 'desc';
@@ -101,11 +104,25 @@ export function VirtualizedTurnTable({ turns, onTurnClick, className }: Virtuali
       if (!turn || !expandedTurns.has(turn.turn_number)) {
         return ROW_HEIGHT_COLLAPSED;
       }
-      // Estimate expanded height based on content
-      let height = ROW_HEIGHT_EXPANDED_BASE;
-      if (turn.tools_used.length > 0) height += 40;
-      if (turn.user_message) height += Math.min(160, Math.ceil(turn.user_message.length / 100) * 20 + 40);
-      if (turn.assistant_message) height += Math.min(240, Math.ceil(turn.assistant_message.length / 100) * 20 + 40);
+      // Estimate expanded height based on content, respecting max-height constraints
+      // Base: collapsed row (72) + border/padding for expanded area (~60)
+      let height = ROW_HEIGHT_COLLAPSED + 60;
+      // Timestamp line
+      height += 20;
+      // Tools section (label + badges with max-h-20 = 80px)
+      if (turn.tools_used.length > 0) {
+        height += 24 + Math.min(80, Math.ceil(turn.tools_used.length / 6) * 32 + 8);
+      }
+      // User message section (label + content capped at USER_MESSAGE_MAX_HEIGHT)
+      if (turn.user_message) {
+        const estimatedContentHeight = Math.ceil(turn.user_message.length / 80) * 20 + 24; // 24px for padding
+        height += 24 + Math.min(USER_MESSAGE_MAX_HEIGHT, estimatedContentHeight);
+      }
+      // Assistant message section (label + content capped at ASSISTANT_MESSAGE_MAX_HEIGHT)
+      if (turn.assistant_message) {
+        const estimatedContentHeight = Math.ceil(turn.assistant_message.length / 80) * 20 + 24;
+        height += 24 + Math.min(ASSISTANT_MESSAGE_MAX_HEIGHT, estimatedContentHeight);
+      }
       return height;
     },
     [filteredTurns, expandedTurns]
@@ -117,6 +134,11 @@ export function VirtualizedTurnTable({ turns, onTurnClick, className }: Virtuali
     estimateSize: getRowHeight,
     overscan: 5,
   });
+
+  // Re-measure all items when expanded set changes so virtualizer recalculates layout
+  useEffect(() => {
+    virtualizer.measure();
+  }, [expandedTurns, virtualizer]);
 
   const toggleExpanded = useCallback((turnNumber: number) => {
     setExpandedTurns((prev) => {
@@ -285,7 +307,7 @@ export function VirtualizedTurnTable({ turns, onTurnClick, className }: Virtuali
               return (
                 <div
                   key={turn.turn_number}
-                  className="absolute left-0 top-0 w-full"
+                  className="absolute left-0 top-0 w-full overflow-hidden"
                   style={{
                     height: `${virtualRow.size}px`,
                     transform: `translateY(${virtualRow.start}px)`,
@@ -321,7 +343,7 @@ function TurnRow({ turn, isExpanded, onClick }: TurnRowProps) {
   return (
     <div
       className={cn(
-        'mx-2 my-1 rounded-lg bg-[var(--color-background)] cursor-pointer transition-colors hover:bg-gray-800/50',
+        'mx-2 my-1 rounded-lg bg-[var(--color-background)] cursor-pointer transition-colors hover:bg-gray-800/50 overflow-hidden',
         isExpanded && 'ring-1 ring-[var(--color-primary-500)]/30'
       )}
       onClick={onClick}
@@ -340,7 +362,7 @@ function TurnRow({ turn, isExpanded, onClick }: TurnRowProps) {
               {turn.model.split('-').slice(-1)[0]}
             </Badge>
           )}
-          {turn.is_subagent && (
+          {turn.has_subagents && (
             <Badge variant="warning" className="shrink-0 text-xs">
               <Bot className="mr-1 h-3 w-3" />
               Subagent
@@ -420,20 +442,20 @@ function TurnRow({ turn, isExpanded, onClick }: TurnRowProps) {
 
       {/* Expanded content */}
       {isExpanded && (
-        <div className="px-4 pb-4 space-y-4 border-t border-gray-700/50 mt-2 pt-4">
+        <div className="px-4 pb-4 space-y-3 border-t border-gray-700/50 mt-2 pt-3 overflow-hidden">
           {/* Timestamp */}
-          <div className="text-xs text-gray-500">
+          <div className="text-xs text-gray-500 truncate">
             {formatDateTime(turn.started_at)}
             {turn.ended_at && ` - ${formatDateTime(turn.ended_at)}`}
           </div>
 
           {/* Tools used */}
           {turn.tools_used.length > 0 && (
-            <div>
+            <div className="overflow-hidden">
               <p className="text-xs text-gray-400 mb-2">Tools Used</p>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 max-h-20 overflow-y-auto">
                 {turn.tools_used.map((tool, i) => (
-                  <Badge key={i} variant="default" className="text-xs">
+                  <Badge key={i} variant="default" className="text-xs shrink-0">
                     {tool}
                   </Badge>
                 ))}
@@ -443,20 +465,20 @@ function TurnRow({ turn, isExpanded, onClick }: TurnRowProps) {
 
           {/* User message */}
           {turn.user_message && (
-            <div>
+            <div className="overflow-hidden">
               <p className="text-xs text-gray-400 mb-2">User Message</p>
-              <div className="rounded bg-gray-800 p-3 text-sm text-gray-300 max-h-40 overflow-y-auto">
-                <pre className="whitespace-pre-wrap font-sans">{cleanMessageContent(turn.user_message)}</pre>
+              <div className="rounded bg-gray-800 p-3 text-sm text-gray-300 overflow-y-auto" style={{ maxHeight: `${USER_MESSAGE_MAX_HEIGHT}px` }}>
+                <pre className="whitespace-pre-wrap font-sans break-words overflow-hidden">{cleanMessageContent(turn.user_message)}</pre>
               </div>
             </div>
           )}
 
           {/* Assistant message */}
           {turn.assistant_message && (
-            <div>
+            <div className="overflow-hidden">
               <p className="text-xs text-gray-400 mb-2">Assistant Response</p>
-              <div className="rounded bg-gray-800 p-3 text-sm text-gray-300 max-h-60 overflow-y-auto">
-                <pre className="whitespace-pre-wrap font-sans">{cleanMessageContent(turn.assistant_message)}</pre>
+              <div className="rounded bg-gray-800 p-3 text-sm text-gray-300 overflow-y-auto" style={{ maxHeight: `${ASSISTANT_MESSAGE_MAX_HEIGHT}px` }}>
+                <pre className="whitespace-pre-wrap font-sans break-words overflow-hidden">{cleanMessageContent(turn.assistant_message)}</pre>
               </div>
             </div>
           )}

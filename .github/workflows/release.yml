@@ -28,24 +28,24 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.ref_name || format('v{0}', inputs.version) }}
-          release_name: Claude Analytics ${{ github.ref_name || format('v{0}', inputs.version) }}
+          release_name: Ironhide ${{ github.ref_name || format('v{0}', inputs.version) }}
           body: |
-            ## Claude Code Analytics Dashboard
+            ## Ironhide
 
             Download the appropriate version for your operating system:
 
             ### macOS
-            - **Apple Silicon (M1/M2/M3)**: `Claude.Analytics_*_aarch64.dmg`
-            - **Intel**: `Claude.Analytics_*_x64.dmg`
+            - **Apple Silicon (M1/M2/M3)**: `Ironhide_*_aarch64.dmg`
+            - **Intel**: `Ironhide_*_x64.dmg`
 
             ### Windows
-            - **Installer (recommended)**: `Claude.Analytics_*_x64-setup.exe`
-            - **MSI**: `Claude.Analytics_*_x64_en-US.msi`
+            - **Installer (recommended)**: `Ironhide_*_x64-setup.exe`
+            - **MSI**: `Ironhide_*_x64_en-US.msi`
 
             ### Linux
-            - **AppImage (universal)**: `Claude.Analytics_*_amd64.AppImage`
-            - **Debian/Ubuntu**: `Claude.Analytics_*_amd64.deb`
-            - **Fedora/RHEL**: `Claude.Analytics_*-1.x86_64.rpm`
+            - **AppImage (universal)**: `Ironhide_*_amd64.AppImage`
+            - **Debian/Ubuntu**: `Ironhide_*_amd64.deb`
+            - **Fedora/RHEL**: `Ironhide_*-1.x86_64.rpm`
 
             ---
 
@@ -106,7 +106,7 @@ jobs:
             libayatana-appindicator3-dev
 
       - name: Install frontend dependencies
-        working-directory: tauri-app/claude-analytics
+        working-directory: tauri-app/ironhide
         run: bun install
 
       - name: Build Tauri app
@@ -116,7 +116,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          projectPath: tauri-app/claude-analytics
+          projectPath: tauri-app/ironhide
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: --target ${{ matrix.target }}
 
@@ -155,19 +155,19 @@ jobs:
             "platforms": {
               "darwin-aarch64": {
                 "signature": "",
-                "url": "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/Claude.Analytics_${VERSION}_aarch64.dmg"
+                "url": "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/Ironhide_${VERSION}_aarch64.dmg"
               },
               "darwin-x86_64": {
                 "signature": "",
-                "url": "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/Claude.Analytics_${VERSION}_x64.dmg"
+                "url": "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/Ironhide_${VERSION}_x64.dmg"
               },
               "linux-x86_64": {
                 "signature": "",
-                "url": "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/Claude.Analytics_${VERSION}_amd64.AppImage"
+                "url": "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/Ironhide_${VERSION}_amd64.AppImage"
               },
               "windows-x86_64": {
                 "signature": "",
-                "url": "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/Claude.Analytics_${VERSION}_x64-setup.exe"
+                "url": "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/Ironhide_${VERSION}_x64-setup.exe"
               }
             }
           }

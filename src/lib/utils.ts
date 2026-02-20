@@ -147,14 +147,51 @@ export function formatTokens(tokens: number): string {
   return formatCompactNumber(tokens);
 }
 
+/**
+ * Extract a disambiguated project display name from a full path.
+ *
+ * Strips the `/Users/<username>/` prefix so that projects sharing the same
+ * last segment (e.g. two different "backend" directories) are visually
+ * distinct.
+ *
+ * Examples:
+ *   /Users/nadavbarkai/dev/market/analyzer/backend  -> dev/market/analyzer/backend
+ *   /Users/nadavbarkai/dev/ironhide                 -> dev/ironhide
+ *   /Users/nadavbarkai/projects/calculator-app       -> projects/calculator-app
+ *   /some/other/path                                 -> other/path  (last 2 segments fallback)
+ */
+export function getProjectDisplayName(projectPath: string): string {
+  if (!projectPath) return 'Unknown';
+
+  // Remove trailing slashes
+  const cleaned = projectPath.replace(/\/+$/, '');
+  const segments = cleaned.split('/');
+
+  // Detect /Users/<username>/... pattern and strip it
+  // segments[0] = '', segments[1] = 'Users', segments[2] = '<username>', segments[3+] = rest
+  if (segments.length > 3 && segments[1] === 'Users') {
+    const rest = segments.slice(3).join('/');
+    return rest || segments[segments.length - 1] || 'Unknown';
+  }
+
+  // Fallback: show last 2 meaningful segments to provide some context
+  const meaningful = segments.filter(Boolean);
+  if (meaningful.length <= 2) {
+    return meaningful.join('/') || 'Unknown';
+  }
+  return meaningful.slice(-2).join('/');
+}
+
+/** @deprecated Use getProjectDisplayName instead for disambiguated names */
 export function getProjectName(projectPath: string): string {
   const parts = projectPath.split('/');
   return parts[parts.length - 1] || projectPath;
 }
 
-export function calculateCacheHitRate(cacheRead: number, _cacheWrite: number, totalInput: number): number {
-  if (totalInput === 0) return 0;
-  return (cacheRead / totalInput) * 100;
+export function calculateCacheHitRate(cacheRead: number, cacheWrite: number): number {
+  const total = cacheRead + cacheWrite;
+  if (total === 0) return 0;
+  return (cacheRead / total) * 100;
 }
 
 // Date helpers

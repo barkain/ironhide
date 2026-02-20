@@ -65,7 +65,7 @@ export function TurnDetailView({ turn, onClose }: TurnDetailViewProps) {
             <div className="flex items-center gap-4">
               <CardTitle className="flex items-center gap-2">
                 <span className="text-2xl font-bold text-white">Turn #{turn.turn_number}</span>
-                {turn.is_subagent && (
+                {turn.has_subagents && (
                   <Badge variant="warning" className="ml-2">
                     <Bot className="mr-1 h-3 w-3" />
                     Subagent
@@ -110,8 +110,8 @@ export function TurnDetailView({ turn, onClose }: TurnDetailViewProps) {
               label="Input Tokens"
               value={formatCompactNumber(turn.tokens.input)}
               detail={formatNumber(turn.tokens.input)}
-              icon={<Zap className="h-4 w-4 text-purple-400" />}
-              color="purple"
+              icon={<Zap className="h-4 w-4 text-blue-400" />}
+              color="blue"
             />
             <MetricCard
               label="Output Tokens"
@@ -124,8 +124,8 @@ export function TurnDetailView({ turn, onClose }: TurnDetailViewProps) {
               label="Cache Hit"
               value={formatCompactNumber(turn.tokens.cache_read)}
               detail={`Write: ${formatCompactNumber(turn.tokens.cache_write)}`}
-              icon={<Database className="h-4 w-4 text-blue-400" />}
-              color="blue"
+              icon={<Database className="h-4 w-4 text-cyan-400" />}
+              color="cyan"
             />
             <MetricCard
               label="Cost"
@@ -144,9 +144,9 @@ export function TurnDetailView({ turn, onClose }: TurnDetailViewProps) {
             onToggle={() => toggleSection('tokens')}
           >
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-              <TokenBreakdownItem label="Input" value={turn.tokens.input} color="purple" />
+              <TokenBreakdownItem label="Input" value={turn.tokens.input} color="blue" />
               <TokenBreakdownItem label="Output" value={turn.tokens.output} color="green" />
-              <TokenBreakdownItem label="Cache Read" value={turn.tokens.cache_read} color="blue" />
+              <TokenBreakdownItem label="Cache Read" value={turn.tokens.cache_read} color="cyan" />
               <TokenBreakdownItem label="Cache Write" value={turn.tokens.cache_write} color="orange" />
               <TokenBreakdownItem label="Total" value={turn.tokens.total} color="white" isTotal />
             </div>
@@ -155,8 +155,8 @@ export function TurnDetailView({ turn, onClose }: TurnDetailViewProps) {
               <div className="flex justify-between text-xs text-gray-400 mb-1">
                 <span>Cache Efficiency</span>
                 <span>
-                  {turn.tokens.input > 0
-                    ? ((turn.tokens.cache_read / turn.tokens.input) * 100).toFixed(1)
+                  {(turn.tokens.cache_read + turn.tokens.cache_write) > 0
+                    ? ((turn.tokens.cache_read / (turn.tokens.cache_read + turn.tokens.cache_write)) * 100).toFixed(1)
                     : 0}
                   % hit rate
                 </span>
@@ -165,7 +165,7 @@ export function TurnDetailView({ turn, onClose }: TurnDetailViewProps) {
                 <div
                   className="h-full bg-gradient-to-r from-blue-500 to-green-500"
                   style={{
-                    width: `${turn.tokens.input > 0 ? (turn.tokens.cache_read / turn.tokens.input) * 100 : 0}%`,
+                    width: `${(turn.tokens.cache_read + turn.tokens.cache_write) > 0 ? Math.min(100, (turn.tokens.cache_read / (turn.tokens.cache_read + turn.tokens.cache_write)) * 100) : 0}%`,
                   }}
                 />
               </div>
@@ -294,7 +294,7 @@ interface MetricCardProps {
   value: string;
   detail?: string;
   icon: React.ReactNode;
-  color: 'purple' | 'green' | 'blue' | 'yellow' | 'orange';
+  color: 'purple' | 'green' | 'blue' | 'yellow' | 'orange' | 'cyan';
 }
 
 const metricColorStyles: Record<MetricCardProps['color'], string> = {
@@ -303,6 +303,7 @@ const metricColorStyles: Record<MetricCardProps['color'], string> = {
   blue: 'border-blue-800/50 bg-blue-900/20',
   yellow: 'border-yellow-800/50 bg-yellow-900/20',
   orange: 'border-orange-800/50 bg-orange-900/20',
+  cyan: 'border-cyan-800/50 bg-cyan-900/20',
 };
 
 function MetricCard({ label, value, detail, icon, color }: MetricCardProps) {
@@ -327,7 +328,7 @@ function MetricCard({ label, value, detail, icon, color }: MetricCardProps) {
 interface TokenBreakdownItemProps {
   label: string;
   value: number;
-  color: 'purple' | 'green' | 'blue' | 'orange' | 'white';
+  color: 'purple' | 'green' | 'blue' | 'orange' | 'white' | 'cyan';
   isTotal?: boolean;
 }
 
@@ -337,6 +338,7 @@ const tokenColorStyles: Record<TokenBreakdownItemProps['color'], string> = {
   blue: 'text-blue-400',
   orange: 'text-orange-400',
   white: 'text-white',
+  cyan: 'text-cyan-400',
 };
 
 function TokenBreakdownItem({ label, value, color, isTotal }: TokenBreakdownItemProps) {

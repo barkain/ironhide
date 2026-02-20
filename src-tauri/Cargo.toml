@@ -1,15 +1,15 @@
 [package]
-name = "claude-analytics"
+name = "ironhide"
 version = "0.2.0"
-description = "Claude Code Analytics Dashboard - Analyze Claude Code sessions with deep insights, metrics, and recommendations"
-authors = ["Claude Analytics Contributors"]
+description = "Ironhide - Analyze Claude Code sessions with deep insights, metrics, and recommendations"
+authors = ["Ironhide Contributors"]
 license = "MIT"
-repository = "https://github.com/YOUR_USERNAME/claude-code-analytics-dashboard"
-homepage = "https://github.com/YOUR_USERNAME/claude-code-analytics-dashboard"
+repository = "https://github.com/barkain/ironhide"
+homepage = "https://github.com/barkain/ironhide"
 edition = "2021"
 
 [lib]
-name = "claude_analytics_lib"
+name = "ironhide_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]
@@ -19,7 +19,6 @@ tauri-build = { version = "2", features = [] }
 # Tauri framework
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
-tauri-plugin-updater = "2"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

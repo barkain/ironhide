@@ -1,8 +1,10 @@
-# Claude Analytics
+<p align="center">
+  <img src="docs/banner.png" alt="Ironhide - Claude Code Analytics Dashboard" width="100%">
+</p>
+
+# Ironhide
 
 A native desktop application for analyzing Claude Code sessions with deep insights, metrics, and recommendations.
-
-![Claude Analytics Dashboard](./screenshots/dashboard-placeholder.png)
 
 ## Features
 
@@ -34,12 +36,12 @@ Download the latest release for your platform:
 
 | Platform | Download |
 |----------|----------|
-| macOS (Apple Silicon) | [Claude.Analytics_*.dmg (arm64)](https://github.com/YOUR_USERNAME/claude-code-analytics-dashboard/releases/latest) |
-| macOS (Intel) | [Claude.Analytics_*.dmg (x64)](https://github.com/YOUR_USERNAME/claude-code-analytics-dashboard/releases/latest) |
-| Windows | [Claude.Analytics_*-setup.exe](https://github.com/YOUR_USERNAME/claude-code-analytics-dashboard/releases/latest) |
-| Linux (AppImage) | [Claude.Analytics_*.AppImage](https://github.com/YOUR_USERNAME/claude-code-analytics-dashboard/releases/latest) |
-| Linux (Debian) | [Claude.Analytics_*.deb](https://github.com/YOUR_USERNAME/claude-code-analytics-dashboard/releases/latest) |
-| Linux (Fedora) | [Claude.Analytics_*.rpm](https://github.com/YOUR_USERNAME/claude-code-analytics-dashboard/releases/latest) |
+| macOS (Apple Silicon) | [Ironhide_*.dmg (arm64)](https://github.com/YOUR_USERNAME/ironhide/releases/latest) |
+| macOS (Intel) | [Ironhide_*.dmg (x64)](https://github.com/YOUR_USERNAME/ironhide/releases/latest) |
+| Windows | [Ironhide_*-setup.exe](https://github.com/YOUR_USERNAME/ironhide/releases/latest) |
+| Linux (AppImage) | [Ironhide_*.AppImage](https://github.com/YOUR_USERNAME/ironhide/releases/latest) |
+| Linux (Debian) | [Ironhide_*.deb](https://github.com/YOUR_USERNAME/ironhide/releases/latest) |
+| Linux (Fedora) | [Ironhide_*.rpm](https://github.com/YOUR_USERNAME/ironhide/releases/latest) |
 
 ### Build from Source
 
@@ -56,8 +58,8 @@ Download the latest release for your platform:
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/claude-code-analytics-dashboard.git
-cd claude-code-analytics-dashboard
+git clone https://github.com/YOUR_USERNAME/ironhide.git
+cd ironhide
 
 # Install dependencies
 bun install
@@ -100,7 +102,7 @@ The app automatically reads Claude Code session data from:
 ### Project Structure
 
 ```
-claude-code-analytics-dashboard/
+ironhide/
 ├── src/                    # React frontend
 │   ├── components/         # UI components
 │   ├── pages/             # Page components
@@ -156,7 +158,7 @@ To enable auto-updates for your own builds:
 
 1. Generate a key pair:
    ```bash
-   bun tauri signer generate -w ~/.tauri/claude-analytics.key
+   bun tauri signer generate -w ~/.tauri/ironhide.key
    ```
 
 2. Set the public key in `tauri.conf.json` under `plugins.updater.pubkey`

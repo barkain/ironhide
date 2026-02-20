@@ -96,7 +96,7 @@ export const useAppStore = create<AppState>()(
         set({ selectedForComparison: sessionIds.slice(0, MAX_COMPARISON_SESSIONS) }),
     }),
     {
-      name: 'claude-analytics-storage',
+      name: 'ironhide-storage',
       partialize: (state) => ({
         sidebarCollapsed: state.sidebarCollapsed,
         dateRange: state.dateRange,

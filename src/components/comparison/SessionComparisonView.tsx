@@ -19,6 +19,7 @@ import {
   formatNumber,
   formatCompactNumber,
   formatDuration,
+  getProjectDisplayName,
   cn,
 } from '../../lib/utils';
 import { compareSessions, getSessions, getSession, getTurns } from '../../lib/tauri';
@@ -78,7 +79,7 @@ function SessionSelector({
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-2">
             <div className={cn('h-3 w-3 rounded-full', color)} />
-            <span className="font-semibold text-white">{selectedSession.project_name}</span>
+            <span className="font-semibold text-white">{getProjectDisplayName(selectedSession.project_path)}</span>
           </div>
           <button
             onClick={onRemove}
@@ -141,7 +142,7 @@ function SessionSelector({
                   }}
                   className="w-full text-left p-3 hover:bg-gray-800 transition-colors"
                 >
-                  <div className="font-medium text-white">{session.project_name}</div>
+                  <div className="font-medium text-white">{getProjectDisplayName(session.project_path)}</div>
                   <div className="text-xs text-gray-400 truncate">{session.id}</div>
                   <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
                     <span>{formatCurrency(session.total_cost)}</span>
@@ -230,7 +231,7 @@ function MetricCard({ label, values, format, higherIsBetter = false, sessions }:
                     )}
                   />
                   <span className="text-xs text-gray-500 truncate max-w-[100px]">
-                    {session.project_name}
+                    {getProjectDisplayName(session.project_path)}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -340,13 +341,13 @@ function ComparisonChart({ sessions, turnsData, metric }: ComparisonChartProps) 
               formatter={(value, name) => {
                 const index = parseInt(String(name).replace('session', ''));
                 const session = sessions[index];
-                return [formatter(value as number), session?.project_name || name];
+                return [formatter(value as number), session ? getProjectDisplayName(session.project_path) : name];
               }}
             />
             <Legend
               formatter={(value) => {
                 const index = parseInt(value.replace('session', ''));
-                return sessions[index]?.project_name || value;
+                return sessions[index] ? getProjectDisplayName(sessions[index].project_path) : value;
               }}
             />
             {sessions.map((_, index) => (
@@ -439,13 +440,13 @@ function ToolDistributionChart({ sessions, sessionDetails }: ToolDistributionCha
               formatter={(value, name) => {
                 const index = parseInt(String(name).replace('session', ''));
                 const session = sessions[index];
-                return [value, session?.project_name || name];
+                return [value, session ? getProjectDisplayName(session.project_path) : name];
               }}
             />
             <Legend
               formatter={(value) => {
                 const index = parseInt(value.replace('session', ''));
-                return sessions[index]?.project_name || value;
+                return sessions[index] ? getProjectDisplayName(sessions[index].project_path) : value;
               }}
             />
             {sessions.map((_, index) => (
@@ -738,7 +739,7 @@ export function SessionComparisonView({ initialSessionIds }: SessionComparisonVi
                         <span className="text-2xl font-bold text-white">{grade}</span>
                       </div>
                       <span className="mt-2 text-sm text-gray-400 truncate max-w-[120px]">
-                        {session.project_name}
+                        {getProjectDisplayName(session.project_path)}
                       </span>
                     </div>
                   );
@@ -779,7 +780,7 @@ export function SessionComparisonView({ initialSessionIds }: SessionComparisonVi
                               colors[index % colors.length]
                             )}
                           >
-                            {session.project_name}
+                            {getProjectDisplayName(session.project_path)}
                           </th>
                         );
                       })}

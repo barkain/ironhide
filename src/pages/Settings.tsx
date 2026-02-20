@@ -78,7 +78,7 @@ function Settings() {
     <div className="flex flex-col">
       <Header
         title="Settings"
-        subtitle="Configure your Claude Analytics preferences"
+        subtitle="Configure your Ironhide preferences"
       />
 
       <div className="flex-1 p-6 space-y-6 max-w-2xl">

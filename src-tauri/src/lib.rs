@@ -1,6 +1,6 @@
-//! Claude Code Analytics - Tauri Backend
+//! Ironhide - Tauri Backend
 //!
-//! This library provides the Rust backend for the Claude Code Analytics dashboard.
+//! This library provides the Rust backend for the Ironhide analytics dashboard.
 //! It handles:
 //! - JSONL session file parsing
 //! - SQLite database management
@@ -19,19 +19,19 @@ pub mod recommendations;
 pub mod trends;
 pub mod watcher;
 
-use std::sync::Mutex;
+use std::sync::OnceLock;
 
 use db::Database;
 
 /// Application state managed by Tauri
 pub struct AppState {
-    pub db: Mutex<Option<Database>>,
+    pub db: OnceLock<Database>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
         Self {
-            db: Mutex::new(None),
+            db: OnceLock::new(),
         }
     }
 }
@@ -76,7 +76,7 @@ pub fn run() {
         .with_max_level(tracing::Level::INFO)
         .init();
 
-    tracing::info!("Starting Claude Code Analytics backend");
+    tracing::info!("Starting Ironhide backend");
 
     // Initialize database before session scan
     let db_path = db::default_db_path();
@@ -97,9 +97,9 @@ pub fn run() {
                 AppState::default()
             } else {
                 tracing::info!("Database initialized successfully at {:?}", db_path);
-                AppState {
-                    db: Mutex::new(Some(database)),
-                }
+                let state = AppState::default();
+                let _ = state.db.set(database);
+                state
             }
         }
         Err(e) => {
@@ -117,7 +117,6 @@ pub fn run() {
     tauri::Builder::default()
         .manage(app_state)
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             // Session commands
             commands::get_sessions,
@@ -125,6 +124,7 @@ pub fn run() {
             commands::get_session_metrics,
             commands::get_session_count,
             commands::get_sessions_filtered,
+            commands::get_sessions_by_project,
             commands::preload_all_sessions,
             // Turn commands
             commands::get_turns,

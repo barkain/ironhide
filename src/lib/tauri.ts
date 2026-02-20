@@ -49,6 +49,11 @@ export async function preloadAllSessions(): Promise<number> {
   return invoke('preload_all_sessions');
 }
 
+/** Get all sessions for a specific project path (server-side filtering) */
+export async function getSessionsByProject(projectPath: string): Promise<SessionSummary[]> {
+  return invoke('get_sessions_by_project', { projectPath });
+}
+
 /** Get sessions filtered by date range (uses cached data for efficiency) */
 export async function getSessionsFiltered(
   startDate?: string,
@@ -69,9 +74,9 @@ export async function getSessionsFiltered(
 // ============================================================================
 
 /** Get dashboard summary metrics (using efficient backend command) */
-export async function getDashboardSummary(_dateRange?: DateRange): Promise<DashboardSummary> {
-  // Use the efficient backend command that limits processing
-  return invoke('get_dashboard_summary', { limit: 100 });
+export async function getDashboardSummary(): Promise<DashboardSummary> {
+  // Use the efficient backend command - processes ALL sessions for accurate totals
+  return invoke('get_dashboard_summary', {});
 }
 
 /** Get daily metrics for charts (using efficient backend command) */
@@ -82,8 +87,8 @@ export async function getDailyMetrics(_dateRange?: DateRange): Promise<DailyMetr
 
 /** Get project-level metrics (using efficient backend command) */
 export async function getProjectMetrics(): Promise<ProjectMetrics[]> {
-  // Use the efficient backend command
-  return invoke('get_project_metrics', { limit: 20 });
+  // Use the efficient backend command - no limit, return all projects
+  return invoke('get_project_metrics', {});
 }
 
 // ============================================================================
@@ -121,7 +126,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 export async function getSettings(): Promise<AppSettings> {
   // Load from localStorage
-  const stored = localStorage.getItem('claude-analytics-settings');
+  const stored = localStorage.getItem('ironhide-settings');
   if (stored) {
     try {
       return { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
@@ -135,61 +140,7 @@ export async function getSettings(): Promise<AppSettings> {
 export async function updateSettings(settings: Partial<AppSettings>): Promise<void> {
   const current = await getSettings();
   const updated = { ...current, ...settings };
-  localStorage.setItem('claude-analytics-settings', JSON.stringify(updated));
-}
-
-// ============================================================================
-// Legacy Compatibility (will be removed)
-// ============================================================================
-
-/** @deprecated Use getSession instead */
-export async function getSessionsByProject(projectPath: string): Promise<SessionSummary[]> {
-  // Limit to 100 sessions for performance
-  const sessions = await getSessions(100, 0);
-  return sessions.filter(s => s.project_path === projectPath);
-}
-
-/** @deprecated Use getSessionsFiltered instead for efficient backend filtering */
-export async function getSessionsByDateRange(dateRange: DateRange): Promise<SessionSummary[]> {
-  return getSessionsFiltered(dateRange.start, dateRange.end);
-}
-
-/** @deprecated No longer needed */
-export async function getLastSyncTime(): Promise<string | null> {
-  return new Date().toISOString();
-}
-
-/** @deprecated Use getProjectMetrics instead */
-export async function getModelMetrics(): Promise<{ model: string; usage_count: number; total_cost: number }[]> {
-  // Limit to 100 sessions for performance
-  const sessions = await getSessions(100, 0);
-
-  const byModel = new Map<string, { count: number; cost: number }>();
-
-  for (const session of sessions) {
-    const model = session.model || 'unknown';
-    const current = byModel.get(model) || { count: 0, cost: 0 };
-    byModel.set(model, {
-      count: current.count + 1,
-      cost: current.cost + session.total_cost,
-    });
-  }
-
-  return Array.from(byModel.entries()).map(([model, data]) => ({
-    model,
-    usage_count: data.count,
-    total_cost: data.cost,
-  }));
-}
-
-/** @deprecated Not implemented in new backend */
-export async function getToolUsage(): Promise<{ tool_name: string; usage_count: number }[]> {
-  return [];
-}
-
-/** @deprecated Use other export method */
-export async function exportData(_format: 'csv' | 'json', _dateRange?: DateRange): Promise<string> {
-  return '';
+  localStorage.setItem('ironhide-settings', JSON.stringify(updated));
 }
 
 // ============================================================================
@@ -240,13 +191,24 @@ export interface Recommendation {
   action_items: string[];
 }
 
+/** Summary of recommendations from the backend */
+export interface RecommendationSummary {
+  recommendations: Recommendation[];
+  total_potential_savings: number;
+  top_priority: Recommendation | null;
+  high_confidence_count: number;
+  avg_confidence: number;
+  session_id: string | null;
+  sessions_analyzed: number;
+}
+
 /** Detect anti-patterns in sessions */
 export async function detectAntipatterns(sessionId?: string): Promise<DetectedPattern[]> {
   return invoke('detect_antipatterns', { sessionId });
 }
 
 /** Get recommendations for improving Claude usage */
-export async function getRecommendations(sessionId?: string, limit?: number): Promise<Recommendation[]> {
+export async function getRecommendations(sessionId?: string, limit?: number): Promise<RecommendationSummary> {
   return invoke('get_recommendations', { sessionId, limit });
 }
 
@@ -395,7 +357,7 @@ async function computeTrendsFromSessions(
       turns: daySessions.reduce((sum, s) => sum + s.total_turns, 0),
       total_tokens: daySessions.reduce((sum, s) => sum + s.total_tokens, 0),
       total_cost: daySessions.reduce((sum, s) => sum + s.total_cost, 0),
-      avg_efficiency: 75, // Default efficiency when not available
+      avg_efficiency: 0,
     });
   }
 
@@ -460,7 +422,7 @@ async function computeEfficiencyTrendFromSessions(days: number): Promise<Efficie
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, data]) => ({
       date,
-      efficiency: 75, // Default when not available
+      efficiency: 0,
       sessions: data.sessions,
     }));
 }

@@ -2,7 +2,7 @@
   "lockfileVersion": 1,
   "workspaces": {
     "": {
-      "name": "claude-analytics",
+      "name": "ironhide",
       "dependencies": {
         "@tanstack/react-query": "^5.90.20",
         "@tanstack/react-virtual": "^3.13.18",

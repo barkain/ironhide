@@ -573,7 +573,7 @@ mod tests {
             cache_read_tokens: 1000,
             cache_write_5m_tokens: 500,
             cache_write_1h_tokens: 0,
-            total_tokens: input_tokens + output_tokens,
+            total_tokens: input_tokens + output_tokens + 1000 + 500 + 0, // input + output + cache_read + cache_write_5m + cache_write_1h
             total_context: input_tokens + 1500,
             tool_uses: vec![],
             tool_count: 0,

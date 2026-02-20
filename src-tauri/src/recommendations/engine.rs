@@ -10,6 +10,7 @@ mod thresholds {
     /// CER below this triggers cache optimization recommendation
     pub const LOW_CER: f64 = 0.5;
     /// CER above this is considered excellent
+    #[allow(dead_code)]
     pub const HIGH_CER: f64 = 0.7;
     /// CGR above this triggers context growth warning
     pub const HIGH_CGR: f64 = 2500.0;

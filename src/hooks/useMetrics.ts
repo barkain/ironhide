@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation, keepPreviousData } from '@tanstack/react-query';
 import {
   getDashboardSummary,
   getDailyMetrics,
@@ -29,9 +29,10 @@ export function useDashboardSummary() {
 
   return useQuery<DashboardSummary>({
     queryKey: ['dashboardSummary', dateRange],
-    queryFn: () => getDashboardSummary(dateRange || undefined),
+    queryFn: () => getDashboardSummary(),
     staleTime: METRICS_STALE_TIME,
     gcTime: METRICS_GC_TIME,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -48,6 +49,7 @@ export function useDailyMetrics() {
     queryFn: () => getDailyMetrics(dateRange || undefined),
     staleTime: METRICS_STALE_TIME,
     gcTime: METRICS_GC_TIME,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -62,6 +64,7 @@ export function useProjectMetrics() {
     queryFn: getProjectMetrics,
     staleTime: METRICS_STALE_TIME,
     gcTime: METRICS_GC_TIME,
+    placeholderData: keepPreviousData,
   });
 }
 

@@ -9,7 +9,7 @@ import {
   Cell,
 } from 'recharts';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
-import { formatCurrency } from '../../lib/utils';
+import { formatCurrency, getProjectDisplayName } from '../../lib/utils';
 import type { ProjectMetrics } from '../../types';
 
 interface CostChartProps {
@@ -51,7 +51,7 @@ export function CostChart({ data, isLoading }: CostChartProps) {
     .sort((a, b) => b.total_cost - a.total_cost)
     .slice(0, 6)
     .map((d) => ({
-      name: d.project_name,
+      name: getProjectDisplayName(d.project_path),
       fullPath: d.project_path,
       cost: d.total_cost,
       sessions: d.session_count,

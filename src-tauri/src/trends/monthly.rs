@@ -5,7 +5,9 @@
 use std::collections::HashMap;
 use chrono::{Datelike, NaiveDate};
 
-use super::{DailyTrend, MonthlyTrend, WeeklyTrend};
+use super::{DailyTrend, MonthlyTrend};
+#[cfg(test)]
+use super::WeeklyTrend;
 use super::daily::parse_date;
 use super::weekly::aggregate_to_weekly;
 

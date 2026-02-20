@@ -22,9 +22,10 @@ pub enum ExportFormat {
     Json,
 }
 
-impl ExportFormat {
-    /// Parse format from string
-    pub fn from_str(s: &str) -> Result<Self, CommandError> {
+impl std::str::FromStr for ExportFormat {
+    type Err = CommandError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "csv" => Ok(ExportFormat::Csv),
             "json" => Ok(ExportFormat::Json),
@@ -34,7 +35,9 @@ impl ExportFormat {
             ))),
         }
     }
+}
 
+impl ExportFormat {
     /// Get file extension for format
     pub fn extension(&self) -> &'static str {
         match self {
@@ -186,11 +189,11 @@ mod tests {
 
     #[test]
     fn test_export_format_from_str() {
-        assert!(matches!(ExportFormat::from_str("csv").unwrap(), ExportFormat::Csv));
-        assert!(matches!(ExportFormat::from_str("CSV").unwrap(), ExportFormat::Csv));
-        assert!(matches!(ExportFormat::from_str("json").unwrap(), ExportFormat::Json));
-        assert!(matches!(ExportFormat::from_str("JSON").unwrap(), ExportFormat::Json));
-        assert!(ExportFormat::from_str("xml").is_err());
+        assert!(matches!("csv".parse::<ExportFormat>().unwrap(), ExportFormat::Csv));
+        assert!(matches!("CSV".parse::<ExportFormat>().unwrap(), ExportFormat::Csv));
+        assert!(matches!("json".parse::<ExportFormat>().unwrap(), ExportFormat::Json));
+        assert!(matches!("JSON".parse::<ExportFormat>().unwrap(), ExportFormat::Json));
+        assert!("xml".parse::<ExportFormat>().is_err());
     }
 
     #[test]
@@ -311,7 +314,7 @@ mod tests {
             cost: 0.30,
             tool_count: 3,
             tools_used: vec!["Read".to_string(), "Write".to_string(), "Bash".to_string()],
-            is_subagent: false,
+            has_subagents: false,
             stop_reason: Some("end_turn".to_string()),
         };
 
@@ -349,7 +352,7 @@ mod tests {
             cost: 0.0,
             tool_count: 0,
             tools_used: vec![],
-            is_subagent: false,
+            has_subagents: false,
             stop_reason: None,
         };
 

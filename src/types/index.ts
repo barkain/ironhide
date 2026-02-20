@@ -100,7 +100,7 @@ export interface TurnSummary {
   cost: number;
   tool_count: number;
   tools_used: string[];
-  is_subagent: boolean;
+  has_subagents: boolean;
   stop_reason: string | null;
 }
 

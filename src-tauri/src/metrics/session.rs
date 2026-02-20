@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 use super::cost::{find_pricing, CostBreakdown};
-use super::efficiency::{calculate_cer, calculate_oes, calculate_sei, normalize_cpd, normalize_cpdu, normalize_sei, EfficiencyScore};
+use super::efficiency::{calculate_cer, calculate_oes, calculate_sei_f64, normalize_cpd, normalize_cpdu, normalize_sei, EfficiencyScore};
 use super::tokens::{SessionTokens, TurnTokens};
 
 /// Complete session-level metrics aggregation
@@ -45,15 +45,30 @@ pub struct TokenSummary {
 }
 
 impl TokenSummary {
-    /// Create from session tokens
+    /// Create from session tokens (uses session-level totals as fallback heuristic)
     pub fn from_session_tokens(tokens: &SessionTokens) -> Self {
+        Self::from_session_tokens_with_turns(tokens, None)
+    }
+
+    /// Create from session tokens with optional per-turn data for peak context calculation.
+    /// When per-turn tokens are provided, context_used_pct is the peak single-turn
+    /// context usage (input_tokens + cache_read_tokens) as a percentage of the 200K window.
+    /// Without per-turn data, falls back to max(total_input, total_cache_read) / 200K.
+    pub fn from_session_tokens_with_turns(tokens: &SessionTokens, per_turn_tokens: Option<&[TurnTokens]>) -> Self {
         let total = tokens.total_input + tokens.total_output
             + tokens.total_cache_read + tokens.total_cache_write_5m + tokens.total_cache_write_1h;
 
-        // Estimate context usage based on a 200K context window
         const MAX_CONTEXT: f64 = 200_000.0;
-        let context_used = (tokens.total_input + tokens.total_cache_read + tokens.total_cache_write_5m + tokens.total_cache_write_1h) as f64;
-        let context_used_pct = (context_used / MAX_CONTEXT * 100.0).min(100.0);
+
+        let context_used_pct = if let Some(turn_tokens) = per_turn_tokens {
+            let peak_context = turn_tokens.iter()
+                .map(|t| (t.input_tokens + t.cache_read_tokens) as f64)
+                .fold(0.0_f64, f64::max);
+            (peak_context / MAX_CONTEXT * 100.0).min(100.0)
+        } else {
+            let heuristic_context = tokens.total_input.max(tokens.total_cache_read) as f64;
+            (heuristic_context / MAX_CONTEXT * 100.0).min(100.0)
+        };
 
         Self {
             input: tokens.total_input,
@@ -171,12 +186,18 @@ pub struct SessionMetricsInput {
     pub deliverable_units: f64,
     pub rework_cycles: u32,
     pub clarification_cycles: u32,
+    /// Per-turn token data for peak context calculation.
+    /// If provided, context_used_pct will be based on the peak single-turn context usage.
+    pub per_turn_tokens: Option<Vec<TurnTokens>>,
 }
 
 /// Calculate comprehensive session metrics
 pub fn calculate_session_metrics(input: SessionMetricsInput) -> SessionMetrics {
-    // Token summary
-    let tokens = TokenSummary::from_session_tokens(&input.tokens);
+    // Token summary (use per-turn data for accurate peak context calculation when available)
+    let tokens = TokenSummary::from_session_tokens_with_turns(
+        &input.tokens,
+        input.per_turn_tokens.as_deref(),
+    );
 
     // Cost calculation
     let mut cost = SessionCost::from_breakdown(&input.cost_breakdown, input.turn_count);
@@ -192,8 +213,8 @@ pub fn calculate_session_metrics(input: SessionMetricsInput) -> SessionMetrics {
         0.0
     };
 
-    // Subagent Efficiency Index
-    let sei = calculate_sei(input.deliverable_units as u32, input.subagent_count);
+    // Subagent Efficiency Index (use f64 version to avoid float-to-int truncation)
+    let sei = calculate_sei_f64(input.deliverable_units, input.subagent_count);
 
     // Workflow Friction Score: (rework + clarification) / total cycles
     let wfs = if input.turn_count > 0 {
@@ -290,8 +311,25 @@ pub fn calculate_session_cost(turns: &[TurnTokens], model: &str) -> SessionCost 
 
 /// Quick estimate of deliverable units based on output tokens
 /// Uses heuristic: ~1 DU per 5000 output tokens
+/// Deprecated: prefer estimate_deliverable_units_v2 which uses tool and turn data
 pub fn estimate_deliverable_units(output_tokens: u64) -> f64 {
     (output_tokens as f64 / 5000.0).max(0.1)
+}
+
+/// Improved deliverable units estimation using tool usage and meaningful output turns.
+///
+/// Each tool call contributes ~0.5 deliverable units of work (tool invocations represent
+/// concrete actions like file edits, searches, etc.).
+/// Each turn with meaningful output (>100 output tokens) contributes ~0.3 DU.
+/// Result is clamped to a minimum of 1.0 to avoid division issues downstream.
+///
+/// `turn_data` is a slice of (output_tokens, tool_count) per turn.
+pub fn estimate_deliverable_units_v2(tool_count: u32, turn_data: &[(u64, u32)]) -> f64 {
+    let meaningful_output_turns = turn_data
+        .iter()
+        .filter(|(output_tokens, _)| *output_tokens > 100)
+        .count();
+    (tool_count as f64 * 0.5 + meaningful_output_turns as f64 * 0.3).max(1.0)
 }
 
 #[cfg(test)]
@@ -454,6 +492,7 @@ mod tests {
             deliverable_units: 2.0,
             rework_cycles: 1,
             clarification_cycles: 1,
+            per_turn_tokens: None, // No per-turn data in this test
         };
 
         let metrics = calculate_session_metrics(input);

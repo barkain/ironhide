@@ -17,6 +17,7 @@ import {
   formatNumber,
   formatRelativeTime,
   formatDuration,
+  getProjectDisplayName,
 } from '../lib/utils';
 import {
   DollarSign,
@@ -109,7 +110,7 @@ function Dashboard() {
           <StatCard
             title="Total Tokens"
             value={summary ? formatCompactNumber(summary.total_tokens) : '0'}
-            subtitle="Input + Output tokens"
+            subtitle="Including cache tokens"
             icon={Zap}
             isLoading={summaryLoading}
           />
@@ -164,8 +165,8 @@ function Dashboard() {
                     >
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-medium text-white truncate">
-                            {session.project_name}
+                          <span className="font-medium text-white truncate" title={session.project_path}>
+                            {getProjectDisplayName(session.project_path)}
                           </span>
                           {session.model && (
                             <Badge variant="info" className="text-xs">

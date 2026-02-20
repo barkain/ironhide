@@ -6,16 +6,19 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::Serialize;
 
 use crate::db;
 use crate::metrics::cost::{calculate_turn_cost, CostBreakdown};
 use crate::metrics::session::{
-    calculate_session_metrics, estimate_deliverable_units, SessionMetricsInput,
+    calculate_session_metrics, estimate_deliverable_units, estimate_deliverable_units_v2,
+    SessionMetricsInput,
 };
 use crate::metrics::tokens::{SessionTokens, TurnTokens};
 use crate::export::{
@@ -131,7 +134,7 @@ pub struct TurnSummary {
     pub cost: f64,
     pub tool_count: u32,
     pub tools_used: Vec<String>,
-    pub is_subagent: bool,
+    pub has_subagents: bool,
     pub stop_reason: Option<String>,
 }
 
@@ -182,6 +185,22 @@ pub struct CodeChange {
     pub timestamp: String,
 }
 
+/// Cost trend data point for charts
+#[derive(Debug, Clone, Serialize)]
+pub struct CostTrendPoint {
+    pub date: String,
+    pub cost: f64,
+    pub cumulative_cost: f64,
+}
+
+/// Efficiency trend data point for charts
+#[derive(Debug, Clone, Serialize)]
+pub struct EfficiencyTrendPoint {
+    pub date: String,
+    pub efficiency: f64,
+    pub sessions: u32,
+}
+
 // ============================================================================
 // Session Cache
 // ============================================================================
@@ -190,7 +209,8 @@ pub struct CodeChange {
 struct CachedSession {
     last_modified: SystemTime,
     file_size: u64,
-    turns: Vec<CompletedTurn>,
+    turns: Arc<Vec<CompletedTurn>>,
+    last_accessed: Instant,
 }
 
 /// Cached session list with pre-computed summaries
@@ -222,17 +242,69 @@ lazy_static::lazy_static! {
     static ref SESSION_LIST_CACHE: RwLock<SessionListCache> = RwLock::new(SessionListCache::new());
 }
 
+// ============================================================================
+// TTL Cache for Expensive Aggregations
+// ============================================================================
+
+/// Generic in-memory cache with time-to-live expiration.
+///
+/// Used to avoid recomputing expensive aggregate metrics (dashboard summary,
+/// daily metrics, project metrics) on every request. Each cached value is
+/// paired with the instant it was stored; reads return `None` once the TTL
+/// has elapsed, causing the next caller to recompute and refresh the cache.
+struct AggregateCache<T: Clone> {
+    data: Option<(Instant, T)>,
+    ttl: Duration,
+}
+
+impl<T: Clone> AggregateCache<T> {
+    fn new(ttl_secs: u64) -> Self {
+        Self {
+            data: None,
+            ttl: Duration::from_secs(ttl_secs),
+        }
+    }
+
+    fn get(&self) -> Option<T> {
+        self.data.as_ref().and_then(|(time, data)| {
+            if time.elapsed() < self.ttl {
+                Some(data.clone())
+            } else {
+                None
+            }
+        })
+    }
+
+    fn set(&mut self, data: T) {
+        self.data = Some((Instant::now(), data));
+    }
+}
+
+lazy_static::lazy_static! {
+    /// Cache for `get_dashboard_summary` - TTL 30 seconds
+    static ref DASHBOARD_CACHE: Mutex<AggregateCache<DashboardSummaryResponse>> =
+        Mutex::new(AggregateCache::new(30));
+
+    /// Cache for `get_daily_metrics` - TTL 60 seconds
+    static ref DAILY_CACHE: Mutex<AggregateCache<Vec<DailyMetricsResponse>>> =
+        Mutex::new(AggregateCache::new(60));
+
+    /// Cache for `get_project_metrics` - TTL 60 seconds
+    static ref PROJECT_CACHE: Mutex<AggregateCache<Vec<ProjectMetricsResponse>>> =
+        Mutex::new(AggregateCache::new(60));
+}
+
 /// Flag to track if initial preload is complete
 static SESSIONS_PRELOADED: AtomicBool = AtomicBool::new(false);
 
 /// Check if a session is cached and still valid
-fn get_cached_session(session_id: &str, file_info: &SessionFileInfo) -> Option<Vec<CompletedTurn>> {
+fn get_cached_session(session_id: &str, file_info: &SessionFileInfo) -> Option<Arc<Vec<CompletedTurn>>> {
     let cache = SESSION_CACHE.read().ok()?;
     let cached = cache.get(session_id)?;
 
     // Check if file has been modified
     if cached.last_modified == file_info.modified && cached.file_size == file_info.size {
-        Some(cached.turns.clone())
+        Some(cached.turns.clone()) // Arc clone is cheap
     } else {
         None
     }
@@ -243,9 +315,13 @@ fn cache_session(session_id: &str, file_info: &SessionFileInfo, turns: Vec<Compl
     if let Ok(mut cache) = SESSION_CACHE.write() {
         // Limit cache size to avoid memory issues (500 sessions covers most preloaded data)
         if cache.len() > 500 {
-            // Remove oldest entries (simple eviction - could be improved with LRU)
-            let keys: Vec<String> = cache.keys().take(50).cloned().collect();
-            for key in keys {
+            // Evict oldest 50 entries by last_accessed
+            let mut entries: Vec<(String, Instant)> = cache
+                .iter()
+                .map(|(k, v)| (k.clone(), v.last_accessed))
+                .collect();
+            entries.sort_by_key(|(_, t)| *t);
+            for (key, _) in entries.into_iter().take(50) {
                 cache.remove(&key);
             }
         }
@@ -255,7 +331,8 @@ fn cache_session(session_id: &str, file_info: &SessionFileInfo, turns: Vec<Compl
             CachedSession {
                 last_modified: file_info.modified,
                 file_size: file_info.size,
-                turns,
+                turns: Arc::new(turns),
+                last_accessed: Instant::now(),
             },
         );
     }
@@ -299,13 +376,13 @@ pub fn get_file_mtime(path: &Path) -> Option<String> {
 /// 2. If the stored file_mtime matches the current file's modification time
 ///
 /// Returns Some(true) if cache is valid, Some(false) if needs re-parsing, None on error
+#[allow(dead_code)]
 fn is_db_cache_valid(state: &AppState, session_id: &str, file_path: &Path) -> Option<bool> {
     // Get current file mtime
     let current_mtime = get_file_mtime(file_path)?;
 
     // Check database using with_connection pattern
-    let db_lock = state.db.lock().ok()?;
-    let db = db_lock.as_ref()?;
+    let db = state.db.get()?;
 
     match db.with_connection(|conn| {
         db::queries::is_session_cache_valid(conn, session_id, &current_mtime)
@@ -424,28 +501,9 @@ fn compute_session_summary(file_info: &SessionFileInfo) -> SessionSummary {
 // Helper Functions
 // ============================================================================
 
-/// Initialize the database if needed
-fn init_database(state: &AppState) -> Result<(), CommandError> {
-    let mut db_lock = state.db.lock().unwrap();
-
-    if db_lock.is_some() {
-        return Ok(());
-    }
-
-    // Ensure directory exists
-    let db_path = db::default_db_path();
-    if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| CommandError::Internal(e.to_string()))?;
-    }
-
-    // Create database
-    let database = db::Database::new(db_path)?;
-    database.initialize()?;
-
-    *db_lock = Some(database);
-
-    tracing::info!("Database initialized");
-    Ok(())
+/// Get the database reference, returning error if not initialized
+fn get_database(state: &AppState) -> Result<&db::Database, CommandError> {
+    state.db.get().ok_or(CommandError::NotInitialized)
 }
 
 /// Parse a session and get its turns, using cache when available
@@ -463,7 +521,7 @@ fn get_session_turns(session_id: &str) -> Result<(Vec<CompletedTurn>, SessionFil
 
     // Try in-memory cache first
     if let Some(cached_turns) = get_cached_session(session_id, &file_info) {
-        return Ok((cached_turns, file_info));
+        return Ok(((*cached_turns).to_vec(), file_info));
     }
 
     // Parse the session
@@ -486,6 +544,7 @@ fn get_session_turns(session_id: &str) -> Result<(Vec<CompletedTurn>, SessionFil
 /// Returns:
 /// - `needs_db_store = true` if the session was parsed and should be stored to DB
 /// - `needs_db_store = false` if data came from cache
+#[allow(dead_code)]
 fn get_session_turns_with_db_cache(
     session_id: &str,
     state: &AppState,
@@ -496,7 +555,7 @@ fn get_session_turns_with_db_cache(
     // 1. Try in-memory cache first (fastest)
     if let Some(cached_turns) = get_cached_session(session_id, &file_info) {
         tracing::trace!("Session {} found in memory cache", session_id);
-        return Ok((cached_turns, file_info, false)); // No need to store, already cached
+        return Ok(((*cached_turns).to_vec(), file_info, false)); // No need to store, already cached
     }
 
     // 2. Check database cache with file mtime validation
@@ -643,9 +702,22 @@ fn turn_to_summary(turn: &CompletedTurn) -> TurnSummary {
         cost: cost.total_cost,
         tool_count: turn.tool_count,
         tools_used,
-        is_subagent: turn.has_subagents,
+        has_subagents: turn.has_subagents,
         stop_reason: turn.stop_reason.clone(),
     }
+}
+
+/// Check if a project path represents a real user project.
+///
+/// Claude Code stores session files under `~/.claude/projects/` in directories
+/// whose names are encoded filesystem paths (e.g., `-Users-nadavbarkai-dev-ironhide`
+/// decodes to `/Users/nadavbarkai/dev/ironhide`).
+///
+/// Some sessions live under temporary/artifact paths like `/private/tmp/madrox-logs-...`
+/// which are not real user projects. This function filters those out by requiring
+/// the decoded path to start with `/Users/`.
+fn is_real_user_project(project_path: &str) -> bool {
+    project_path.starts_with("/Users/")
 }
 
 /// Extract project name from path
@@ -675,20 +747,79 @@ pub async fn get_sessions(
     // Use cached session list
     let sessions = get_cached_session_list();
 
-    // Apply pagination
-    let paginated: Vec<SessionFileInfo> = sessions
-        .into_iter()
+    // Get or compute summaries from cache, filtering out empty sessions
+    // and sessions from temporary/artifact paths
+    let summaries: Vec<SessionSummary> = sessions
+        .iter()
+        .map(|file_info| get_cached_summary(file_info))
+        .filter(|s| s.total_turns > 0)
+        .filter(|s| s.project_path.is_empty() || is_real_user_project(&s.project_path))
         .skip(offset)
         .take(limit)
         .collect();
 
-    // Get or compute summaries from cache
-    let summaries: Vec<SessionSummary> = paginated
-        .iter()
-        .map(|file_info| get_cached_summary(file_info))
-        .collect();
-
     Ok(summaries)
+}
+
+/// Detect rework cycles by looking for user messages indicating corrections.
+fn detect_rework_cycles(turns: &[CompletedTurn]) -> u32 {
+    let rework_keywords = [
+        "fix", "wrong", "error", "try again", "doesn't work", "broken",
+        "bug", "incorrect", "failed", "redo", "revert", "not working",
+    ];
+    let mut count = 0u32;
+    for turn in turns {
+        if let Some(ref msg) = turn.user_message {
+            let lower = msg.to_lowercase();
+            if rework_keywords.iter().any(|kw| lower.contains(kw)) {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+/// Detect clarification cycles from short question-like user messages.
+fn detect_clarification_cycles(turns: &[CompletedTurn]) -> u32 {
+    let clarification_keywords = [
+        "?", "what", "how", "which", "clarify", "explain", "why", "where",
+        "can you", "could you", "do you mean",
+    ];
+    let mut count = 0u32;
+    for turn in turns {
+        if let Some(ref msg) = turn.user_message {
+            let lower = msg.to_lowercase();
+            let is_short = msg.len() < 200;
+            let has_question = clarification_keywords.iter().any(|kw| lower.contains(kw));
+            if is_short && has_question {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+/// Calculate cost attributable to subagent turns.
+fn calculate_subagent_cost_from_turns(turns: &[CompletedTurn]) -> f64 {
+    use crate::metrics::cost::calculate_turn_cost;
+    use crate::metrics::tokens::TurnTokens;
+
+    let mut cost = 0.0;
+    for turn in turns {
+        if turn.has_subagents {
+            let turn_tokens = TurnTokens::new(
+                turn.input_tokens,
+                turn.output_tokens,
+                turn.cache_read_tokens,
+                turn.cache_write_5m_tokens,
+                turn.cache_write_1h_tokens,
+            );
+            let model = turn.model.as_deref().unwrap_or("claude-opus-4-5-20251101");
+            let turn_cost = calculate_turn_cost(&turn_tokens, model);
+            cost += turn_cost.total_cost;
+        }
+    }
+    cost
 }
 
 /// Get a single session by ID with full details
@@ -719,8 +850,19 @@ pub async fn get_session(
     ) = calculate_metrics_from_turns(&turns);
 
     // Calculate full metrics
-    let deliverable_units = estimate_deliverable_units(session_tokens.total_output);
+    let turn_data: Vec<(u64, u32)> = turns
+        .iter()
+        .map(|t| (t.output_tokens, t.tool_count))
+        .collect();
+    let deliverable_units = estimate_deliverable_units_v2(tool_count, &turn_data);
+    let rework_cycles = detect_rework_cycles(&turns);
+    let clarification_cycles = detect_clarification_cycles(&turns);
+    let subagent_cost = calculate_subagent_cost_from_turns(&turns);
     let turn_count = turns.len() as u32;
+
+    let per_turn_tokens: Vec<TurnTokens> = turns.iter().map(|t| {
+        TurnTokens::new(t.input_tokens, t.output_tokens, t.cache_read_tokens, t.cache_write_5m_tokens, t.cache_write_1h_tokens)
+    }).collect();
 
     let metrics_input = SessionMetricsInput {
         tokens: session_tokens.clone(),
@@ -732,10 +874,11 @@ pub async fn get_session(
         unique_tools: unique_tools.clone(),
         models_used: models.clone(),
         subagent_count,
-        subagent_cost: 0.0, // TODO: Calculate from subagent sessions
+        subagent_cost,
         deliverable_units,
-        rework_cycles: 0, // TODO: Detect rework patterns
-        clarification_cycles: 0,
+        rework_cycles,
+        clarification_cycles,
+        per_turn_tokens: Some(per_turn_tokens),
     };
 
     let full_metrics = calculate_session_metrics(metrics_input);
@@ -797,11 +940,7 @@ pub async fn get_session(
 /// Get the database path
 #[tauri::command]
 pub async fn get_db_path(state: tauri::State<'_, AppState>) -> Result<String, CommandError> {
-    init_database(&state)?;
-
-    let db_lock = state.db.lock().unwrap();
-    let db = db_lock.as_ref().ok_or(CommandError::NotInitialized)?;
-
+    let db = get_database(&state)?;
     Ok(db.path().to_string_lossy().to_string())
 }
 
@@ -851,7 +990,12 @@ pub async fn refresh_sessions() -> Result<(), CommandError> {
 #[tauri::command]
 pub async fn get_session_count() -> Result<u32, CommandError> {
     let sessions = get_cached_session_list();
-    Ok(sessions.len() as u32)
+    let count = sessions
+        .iter()
+        .map(|file_info| get_cached_summary(file_info))
+        .filter(|s| s.total_turns > 0)
+        .count();
+    Ok(count as u32)
 }
 
 /// Scan for new sessions and return any newly discovered ones
@@ -881,7 +1025,7 @@ pub async fn scan_new_sessions(
         }
     }
 
-    // Get summaries using cache
+    // Get summaries using cache, filtering out empty sessions
     let summaries: Vec<SessionSummary> = new_sessions
         .iter()
         .filter_map(|file_info| {
@@ -890,6 +1034,7 @@ pub async fn scan_new_sessions(
                 Err(_) => None,
             }
         })
+        .filter(|s| s.total_turns > 0)
         .collect();
 
     Ok(summaries)
@@ -898,15 +1043,7 @@ pub async fn scan_new_sessions(
 /// Load all cached sessions from the database
 /// Returns a HashMap keyed by session_id for fast lookup
 fn load_cached_sessions_from_db(state: &AppState) -> HashMap<String, db::queries::CachedSessionData> {
-    let db_lock = match state.db.lock() {
-        Ok(lock) => lock,
-        Err(_) => {
-            tracing::warn!("Failed to acquire DB lock for loading cached sessions");
-            return HashMap::new();
-        }
-    };
-
-    let db = match db_lock.as_ref() {
+    let db = match state.db.get() {
         Some(db) => db,
         None => {
             tracing::debug!("DB not initialized, skipping cache load");
@@ -928,17 +1065,10 @@ fn store_session_to_db(
     state: &AppState,
     _file_info: &SessionFileInfo,  // Reserved for future use (e.g., git branch extraction)
     summary: &SessionSummary,
+    session_tokens: &SessionTokens,
     file_mtime: &str,
 ) {
-    let db_lock = match state.db.lock() {
-        Ok(lock) => lock,
-        Err(_) => {
-            tracing::warn!("Failed to acquire DB lock for storing session {}", summary.id);
-            return;
-        }
-    };
-
-    let db = match db_lock.as_ref() {
+    let db = match state.db.get() {
         Some(db) => db,
         None => {
             tracing::debug!("DB not initialized, skipping session store");
@@ -962,9 +1092,19 @@ fn store_session_to_db(
             file_mtime,
         )?;
 
-        // Store metrics - estimate input/output split as 60/40
-        let input_tokens = (summary.total_tokens as f64 * 0.6) as u64;
-        let output_tokens = summary.total_tokens - input_tokens;
+        // Compute cache_hit_rate (CER) = cache_read / (cache_read + cache_write)
+        let total_cache_write = session_tokens.total_cache_write_5m + session_tokens.total_cache_write_1h;
+        let total_cache = session_tokens.total_cache_read + total_cache_write;
+        let cache_hit_rate = if total_cache > 0 {
+            session_tokens.total_cache_read as f64 / total_cache as f64
+        } else {
+            0.0
+        };
+
+        // Peak context % heuristic (no per-turn data available in this function)
+        const MAX_CONTEXT: f64 = 200_000.0;
+        let peak_context_pct = (session_tokens.total_input.max(session_tokens.total_cache_read) as f64
+            / MAX_CONTEXT * 100.0).min(100.0);
 
         db::queries::upsert_session_metrics(
             conn,
@@ -972,13 +1112,13 @@ fn store_session_to_db(
             summary.total_turns,
             summary.duration_ms,
             summary.total_cost,
-            input_tokens,
-            output_tokens,
-            0, // cache_read - would need detailed turn data
-            0, // cache_write
-            0.0, // efficiency_score
-            0.0, // cache_hit_rate
-            0.0, // peak_context_pct
+            session_tokens.total_input,
+            session_tokens.total_output,
+            session_tokens.total_cache_read,
+            total_cache_write,
+            0.0, // TODO: efficiency_score (OES) requires deliverable_units, subagent data not available here
+            cache_hit_rate,
+            peak_context_pct,
         )
     }) {
         tracing::warn!("Failed to store session {} to DB: {:?}", summary.id, e);
@@ -1075,7 +1215,14 @@ pub async fn preload_all_sessions(
 
         // Store to DB for next startup
         if let Some(ref mtime) = current_mtime {
-            store_session_to_db(&state, session, &summary, mtime);
+            // Compute tokens for DB storage (avoid fabrication)
+            let session_tokens = if let Ok((turns, _)) = get_session_turns(&session.session_id) {
+                let (tokens, _, _, _, _, _, _) = calculate_metrics_from_turns(&turns);
+                tokens
+            } else {
+                SessionTokens::new()
+            };
+            store_session_to_db(&state, session, &summary, &session_tokens, mtime);
         }
 
         // Cache in memory
@@ -1113,16 +1260,21 @@ pub async fn get_sessions_filtered(
     // Use cached session list
     let sessions = get_cached_session_list();
 
-    // Get summaries and filter by date
+    // Get summaries, filter out empty sessions, temp paths, and filter by date
     let summaries: Vec<SessionSummary> = sessions
         .iter()
         .map(|file_info| get_cached_summary(file_info))
+        .filter(|s| s.total_turns > 0)
+        .filter(|s| s.project_path.is_empty() || is_real_user_project(&s.project_path))
         .filter(|summary| {
             // Filter by date range if provided
             if summary.started_at == "unknown" {
                 return true; // Include sessions with unknown dates
             }
 
+            if summary.started_at.len() < 10 {
+                return true; // Include sessions with short date strings
+            }
             let session_date = &summary.started_at[..10]; // Extract YYYY-MM-DD
 
             if let Some(ref start) = start_date {
@@ -1139,6 +1291,31 @@ pub async fn get_sessions_filtered(
         })
         .skip(offset)
         .take(limit)
+        .collect();
+
+    Ok(summaries)
+}
+
+/// Get all sessions for a specific project path
+///
+/// Returns all sessions (including subagent sessions) that belong to the
+/// given project path, applying the same filtering as get_project_metrics
+/// to ensure the session list matches the aggregate metrics shown on
+/// project cards.
+#[tauri::command]
+pub async fn get_sessions_by_project(
+    _state: tauri::State<'_, AppState>,
+    project_path: String,
+) -> Result<Vec<SessionSummary>, CommandError> {
+    let sessions = get_cached_session_list();
+
+    let summaries: Vec<SessionSummary> = sessions
+        .iter()
+        .filter(|file_info| {
+            file_info.project_path.as_deref() == Some(project_path.as_str())
+        })
+        .map(|file_info| get_cached_summary(file_info))
+        .filter(|s| s.total_turns > 0)
         .collect();
 
     Ok(summaries)
@@ -1249,11 +1426,13 @@ pub async fn compare_sessions(
         let model = models.into_iter().next();
 
         // Calculate CER for efficiency comparison
+        // CER = cache_read / (cache_read + cache_write) per efficiency.rs
         let total_tokens_val = session_tokens.total();
         let cache_read = session_tokens.total_cache_read;
         let cache_write = session_tokens.total_cache_write_5m + session_tokens.total_cache_write_1h;
-        let cer = if total_tokens_val > 0 {
-            cache_read as f64 / (cache_read + cache_write + session_tokens.total_input + session_tokens.total_output) as f64
+        let total_cache = cache_read + cache_write;
+        let cer = if total_cache > 0 {
+            cache_read as f64 / total_cache as f64
         } else {
             0.0
         };
@@ -1418,7 +1597,7 @@ pub async fn export_sessions(
     session_ids: Option<Vec<String>>,
     options: ExportOptions,
 ) -> Result<String, CommandError> {
-    let format = ExportFormat::from_str(&options.format)?;
+    let format = options.format.parse::<ExportFormat>()?;
 
     // Get sessions to export from cache
     let all_sessions = get_cached_session_list();
@@ -1550,7 +1729,7 @@ pub async fn export_trends(
     days: u32,
     format: String,
 ) -> Result<String, CommandError> {
-    let export_format = ExportFormat::from_str(&format)?;
+    let export_format = format.parse::<ExportFormat>()?;
 
     // Calculate the date range
     let end_date = chrono::Utc::now();
@@ -1736,18 +1915,26 @@ pub async fn get_trends(
 
 /// Get cost trend for the last N days
 ///
-/// Returns daily cost data for chart visualization.
+/// Returns daily cost data with cumulative totals for chart visualization.
 #[tauri::command]
 pub async fn get_cost_trend(
     _state: tauri::State<'_, AppState>,
     days: Option<u32>,
-) -> Result<Vec<DailyTrend>, String> {
+) -> Result<Vec<CostTrendPoint>, String> {
     let days = days.unwrap_or(30);
     let session_data = collect_session_trend_data();
 
     let daily = get_daily_trends(&session_data, days, None, None);
 
-    Ok(daily)
+    let mut cumulative = 0.0;
+    Ok(daily.into_iter().map(|d| {
+        cumulative += d.total_cost;
+        CostTrendPoint {
+            date: d.date,
+            cost: d.total_cost,
+            cumulative_cost: cumulative,
+        }
+    }).collect())
 }
 
 /// Get efficiency trend for the last N days
@@ -1757,13 +1944,19 @@ pub async fn get_cost_trend(
 pub async fn get_efficiency_trend(
     _state: tauri::State<'_, AppState>,
     days: Option<u32>,
-) -> Result<Vec<DailyTrend>, String> {
+) -> Result<Vec<EfficiencyTrendPoint>, String> {
     let days = days.unwrap_or(30);
     let session_data = collect_session_trend_data();
 
     let daily = get_daily_trends(&session_data, days, None, None);
 
-    Ok(daily)
+    Ok(daily.into_iter().map(|d| {
+        EfficiencyTrendPoint {
+            date: d.date,
+            efficiency: d.avg_efficiency,
+            sessions: d.sessions,
+        }
+    }).collect())
 }
 
 // ============================================================================
@@ -1821,6 +2014,10 @@ fn get_session_recommendations(
     let deliverable_units = estimate_deliverable_units(session_tokens.total_output);
     let turn_count = turns.len() as u32;
 
+    let per_turn_tokens: Vec<TurnTokens> = turns.iter().map(|t| {
+        TurnTokens::new(t.input_tokens, t.output_tokens, t.cache_read_tokens, t.cache_write_5m_tokens, t.cache_write_1h_tokens)
+    }).collect();
+
     let metrics_input = SessionMetricsInput {
         tokens: session_tokens.clone(),
         total_cost: total_breakdown.total_cost,
@@ -1835,6 +2032,7 @@ fn get_session_recommendations(
         deliverable_units,
         rework_cycles: 0, // TODO: Detect rework patterns
         clarification_cycles: 0,
+        per_turn_tokens: Some(per_turn_tokens),
     };
 
     let full_metrics = calculate_session_metrics(metrics_input);
@@ -1904,6 +2102,10 @@ fn get_aggregate_recommendations(limit: Option<u32>) -> Result<RecommendationSum
             let deliverable_units = estimate_deliverable_units(session_tokens.total_output);
             let turn_count = turns.len() as u32;
 
+            let per_turn_tokens: Vec<TurnTokens> = turns.iter().map(|t| {
+                TurnTokens::new(t.input_tokens, t.output_tokens, t.cache_read_tokens, t.cache_write_5m_tokens, t.cache_write_1h_tokens)
+            }).collect();
+
             let metrics_input = SessionMetricsInput {
                 tokens: session_tokens.clone(),
                 total_cost: total_breakdown.total_cost,
@@ -1918,6 +2120,7 @@ fn get_aggregate_recommendations(limit: Option<u32>) -> Result<RecommendationSum
                 deliverable_units,
                 rework_cycles: 0,
                 clarification_cycles: 0,
+                per_turn_tokens: Some(per_turn_tokens),
             };
 
             let full_metrics = calculate_session_metrics(metrics_input);
@@ -2008,20 +2211,26 @@ pub async fn get_dashboard_summary(
     _state: tauri::State<'_, AppState>,
     limit: Option<u32>,
 ) -> Result<DashboardSummaryResponse, CommandError> {
-    let limit = limit.unwrap_or(100) as usize; // Default to 100 sessions for fast load
+    // Return cached result if still valid (TTL 30s)
+    if let Ok(cache) = DASHBOARD_CACHE.lock() {
+        if let Some(cached) = cache.get() {
+            return Ok(cached);
+        }
+    }
+
+    let _limit = limit; // Ignored - process ALL sessions for accurate totals
 
     // Use cached session list
     let sessions = get_cached_session_list();
-    let total_session_count = sessions.len();
+    let _total_session_count = sessions.len();
 
     // Count unique projects from all sessions (quick operation)
+    // Filter out temporary/artifact paths — only real user projects count
     let unique_projects: HashSet<String> = sessions
         .iter()
         .filter_map(|s| s.project_path.clone())
+        .filter(|p| is_real_user_project(p))
         .collect();
-
-    // Process only limited sessions for metrics
-    let limited_sessions: Vec<_> = sessions.into_iter().take(limit).collect();
 
     let mut total_cost = 0.0;
     let mut total_turns = 0u32;
@@ -2030,7 +2239,14 @@ pub async fn get_dashboard_summary(
     let mut efficiency_count = 0u32;
     let mut processed_count = 0u32;
 
-    for file_info in limited_sessions {
+    // Process ALL sessions for accurate aggregate totals
+    for file_info in sessions {
+        // Skip sessions from temporary/artifact paths
+        let project_path = file_info.project_path.clone().unwrap_or_default();
+        if !project_path.is_empty() && !is_real_user_project(&project_path) {
+            continue;
+        }
+
         if let Ok((turns, _)) = get_session_turns(&file_info.session_id) {
             let (
                 session_tokens,
@@ -2064,8 +2280,8 @@ pub async fn get_dashboard_summary(
         None
     };
 
-    Ok(DashboardSummaryResponse {
-        total_sessions: total_session_count as u32,
+    let result = DashboardSummaryResponse {
+        total_sessions: processed_count as u32,
         total_cost,
         total_turns,
         total_tokens,
@@ -2073,7 +2289,14 @@ pub async fn get_dashboard_summary(
         avg_turns_per_session: if processed_count > 0 { total_turns as f64 / processed_count as f64 } else { 0.0 },
         avg_efficiency_score: avg_efficiency,
         active_projects: unique_projects.len() as u32,
-    })
+    };
+
+    // Store in cache for subsequent requests
+    if let Ok(mut cache) = DASHBOARD_CACHE.lock() {
+        cache.set(result.clone());
+    }
+
+    Ok(result)
 }
 
 /// Get daily metrics efficiently
@@ -2084,6 +2307,12 @@ pub async fn get_daily_metrics(
     _state: tauri::State<'_, AppState>,
     days: Option<u32>,
 ) -> Result<Vec<DailyMetricsResponse>, CommandError> {
+    if let Ok(cache) = DAILY_CACHE.lock() {
+        if let Some(cached) = cache.get() {
+            return Ok(cached);
+        }
+    }
+
     let days = days.unwrap_or(30);
     let cutoff = chrono::Utc::now() - chrono::Duration::days(days as i64);
 
@@ -2093,7 +2322,13 @@ pub async fn get_daily_metrics(
     let mut by_date: HashMap<String, (u32, u32, f64, u64, f64, u32)> = HashMap::new();
     // (session_count, total_turns, total_cost, total_tokens, efficiency_sum, efficiency_count)
 
-    for file_info in sessions.iter().take(200) { // Limit to 200 most recent
+    for file_info in sessions.iter() { // Process ALL sessions within date range
+        // Skip sessions from temporary/artifact paths
+        let project_path = file_info.project_path.clone().unwrap_or_default();
+        if !project_path.is_empty() && !is_real_user_project(&project_path) {
+            continue;
+        }
+
         if let Ok((turns, _)) = get_session_turns(&file_info.session_id) {
             if turns.is_empty() {
                 continue;
@@ -2158,6 +2393,10 @@ pub async fn get_daily_metrics(
     // Sort by date descending
     result.sort_by(|a, b| b.date.cmp(&a.date));
 
+    if let Ok(mut cache) = DAILY_CACHE.lock() {
+        cache.set(result.clone());
+    }
+
     Ok(result)
 }
 
@@ -2169,7 +2408,13 @@ pub async fn get_project_metrics(
     _state: tauri::State<'_, AppState>,
     limit: Option<u32>,
 ) -> Result<Vec<ProjectMetricsResponse>, CommandError> {
-    let limit = limit.unwrap_or(20) as usize;
+    if let Ok(cache) = PROJECT_CACHE.lock() {
+        if let Some(cached) = cache.get() {
+            return Ok(cached);
+        }
+    }
+
+    let _limit = limit; // Ignored - return ALL projects for accurate totals
 
     // Use cached session list
     let sessions = get_cached_session_list();
@@ -2177,9 +2422,9 @@ pub async fn get_project_metrics(
     let mut by_project: HashMap<String, (String, u32, f64, u32, u64, String)> = HashMap::new();
     // (project_name, session_count, total_cost, total_turns, total_tokens, last_activity)
 
-    for file_info in sessions.iter().take(200) { // Limit to 200 most recent
+    for file_info in sessions.iter() {
         let project_path = file_info.project_path.clone().unwrap_or_default();
-        if project_path.is_empty() {
+        if project_path.is_empty() || !is_real_user_project(&project_path) {
             continue;
         }
 
@@ -2236,8 +2481,9 @@ pub async fn get_project_metrics(
     // Sort by total cost descending
     result.sort_by(|a, b| b.total_cost.partial_cmp(&a.total_cost).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Limit results
-    result.truncate(limit);
+    if let Ok(mut cache) = PROJECT_CACHE.lock() {
+        cache.set(result.clone());
+    }
 
     Ok(result)
 }
@@ -2301,13 +2547,13 @@ mod tests {
             cache_read: 2000,
             cache_write_5m: 100,
             cache_write_1h: 50,
-            total: 1500,
-            context_used_pct: 1.5,
+            total: 3650, // 1000+500+2000+100+50
+            context_used_pct: 75.0, // 0-100 scale
         };
 
         let json = serde_json::to_string(&summary).unwrap();
         assert!(json.contains("\"input\":1000"));
-        assert!(json.contains("\"context_used_pct\":1.5"));
+        assert!(json.contains("\"context_used_pct\":75.0"));
     }
 
     #[test]
@@ -2352,7 +2598,7 @@ mod tests {
             cost: 0.15,
             tool_count: 2,
             tools_used: vec!["Read".to_string(), "Bash".to_string()],
-            is_subagent: false,
+            has_subagents: false,
             stop_reason: Some("end_turn".to_string()),
         };
 

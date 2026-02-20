@@ -32,9 +32,9 @@ impl TurnTokens {
         }
     }
 
-    /// Total tokens (input + output)
+    /// Total tokens (input + output + all cache tokens)
     pub fn total(&self) -> u64 {
-        self.input_tokens + self.output_tokens
+        self.input_tokens + self.output_tokens + self.cache_read_tokens + self.cache_write_5m_tokens + self.cache_write_1h_tokens
     }
 
     /// Total cache tokens
@@ -75,9 +75,9 @@ impl SessionTokens {
         self.turn_count += 1;
     }
 
-    /// Total tokens across all turns
+    /// Total tokens across all turns (input + output + all cache tokens)
     pub fn total(&self) -> u64 {
-        self.total_input + self.total_output
+        self.total_input + self.total_output + self.total_cache_read + self.total_cache_write_5m + self.total_cache_write_1h
     }
 
     /// Total cache tokens
@@ -133,7 +133,8 @@ pub struct TokenSummary {
 impl TokenSummary {
     /// Create from turn tokens
     pub fn from_turn(turn: &TurnTokens) -> Self {
-        let total = turn.input_tokens + turn.output_tokens;
+        let total = turn.input_tokens + turn.output_tokens + turn.cache_read_tokens
+            + turn.cache_write_5m_tokens + turn.cache_write_1h_tokens;
         let context_used = turn.input_tokens + turn.cache_read_tokens
             + turn.cache_write_5m_tokens + turn.cache_write_1h_tokens;
 
@@ -150,7 +151,8 @@ impl TokenSummary {
 
     /// Create from session tokens
     pub fn from_session(session: &SessionTokens) -> Self {
-        let total = session.total_input + session.total_output;
+        let total = session.total_input + session.total_output + session.total_cache_read
+            + session.total_cache_write_5m + session.total_cache_write_1h;
         let context_used = session.total_input + session.total_cache_read
             + session.total_cache_write_5m + session.total_cache_write_1h;
 
@@ -193,7 +195,7 @@ mod tests {
     #[test]
     fn test_turn_tokens() {
         let tokens = TurnTokens::new(1000, 500, 200, 100, 50);
-        assert_eq!(tokens.total(), 1500);
+        assert_eq!(tokens.total(), 1850); // 1000 + 500 + 200 + 100 + 50
         assert_eq!(tokens.total_cache(), 350);
         assert_eq!(tokens.total_cache_write(), 150);
     }
@@ -208,7 +210,8 @@ mod tests {
         assert_eq!(session.turn_count, 2);
         assert_eq!(session.total_input, 3000);
         assert_eq!(session.total_output, 1500);
-        assert_eq!(session.avg_per_turn(), 2250.0);
+        assert_eq!(session.total(), 5550); // 3000 + 1500 + 600 + 300 + 150
+        assert_eq!(session.avg_per_turn(), 2775.0); // 5550 / 2
     }
 
     #[test]
@@ -229,7 +232,7 @@ mod tests {
         assert_eq!(summary.cache_read, 5000);
         assert_eq!(summary.cache_write_5m, 200);
         assert_eq!(summary.cache_write_1h, 100);
-        assert_eq!(summary.total, 1500);
+        assert_eq!(summary.total, 6800); // 1000 + 500 + 5000 + 200 + 100
         assert_eq!(summary.context_used, 6300); // 1000 + 5000 + 200 + 100
         assert_eq!(summary.total_cache(), 5300);
         assert_eq!(summary.total_cache_write(), 300);
@@ -248,7 +251,7 @@ mod tests {
         assert_eq!(summary.cache_read, 13000);
         assert_eq!(summary.cache_write_5m, 500);
         assert_eq!(summary.cache_write_1h, 300);
-        assert_eq!(summary.total, 4500);
+        assert_eq!(summary.total, 18300); // 3000 + 1500 + 13000 + 500 + 300
         assert_eq!(summary.context_used, 16800); // 3000 + 13000 + 500 + 300
     }
 

@@ -9,6 +9,7 @@ import {
   getSessionCount,
   scanNewSessions,
   getSessionsFiltered,
+  getSessionsByProject,
   preloadAllSessions,
 } from '../lib/tauri';
 import { useAppStore } from '../lib/store';
@@ -118,17 +119,15 @@ export function useTurns(sessionId: string, limit = 100, offset = 0) {
 // Filter Hooks
 // ============================================================================
 
-/** Fetch sessions by project path - filters from cached data */
+/** Fetch sessions by project path - uses dedicated backend command for accurate results */
 export function useSessionsByProject(projectPath: string | null) {
-  const { data: allSessions } = useSessions(1000, 0);
-
   return useQuery<SessionSummary[]>({
     queryKey: ['sessions', 'project', projectPath],
     queryFn: () => {
-      if (!projectPath || !allSessions) return [];
-      return allSessions.filter(s => s.project_path === projectPath);
+      if (!projectPath) return [];
+      return getSessionsByProject(projectPath);
     },
-    enabled: !!projectPath && !!allSessions,
+    enabled: !!projectPath,
     staleTime: SESSION_LIST_STALE_TIME,
     gcTime: SESSION_GC_TIME,
   });
