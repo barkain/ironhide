@@ -47,6 +47,12 @@ jobs:
             - **Debian/Ubuntu**: `Ironhide_*_amd64.deb`
             - **Fedora/RHEL**: `Ironhide_*-1.x86_64.rpm`
 
+            ### macOS Note
+            The app is not code-signed. After installing, right-click the app → **Open** → click **Open** to bypass Gatekeeper. You only need to do this once. Alternatively, run:
+            ```
+            xattr -cr /Applications/Ironhide.app
+            ```
+
             ---
 
             See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.

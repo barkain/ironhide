@@ -60,6 +60,12 @@ Download the latest release for your platform:
 | Linux (Debian) | [Ironhide_*.deb](https://github.com/barkain/ironhide/releases/latest) |
 | Linux (Fedora) | [Ironhide_*.rpm](https://github.com/barkain/ironhide/releases/latest) |
 
+> **macOS Users:** After installing, macOS Gatekeeper may block the app since it's not code-signed. To fix:
+> 1. **Easiest:** Right-click the app → **Open** → click **Open** in the dialog
+> 2. **Or via terminal:** `xattr -cr /Applications/Ironhide.app`
+>
+> You only need to do this once.
+
 ### Build from Source
 
 #### Prerequisites
