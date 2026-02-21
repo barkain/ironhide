@@ -9,6 +9,39 @@ use crate::models::session::{Session, SessionSummary};
 use crate::models::turn::Turn;
 use crate::models::metrics::SessionMetrics;
 
+/// Dashboard aggregate results from SQL query
+#[derive(Debug, Clone)]
+pub struct DashboardAggregates {
+    pub total_sessions: u32,
+    pub total_cost: f64,
+    pub total_turns: u32,
+    pub total_tokens: u64,
+    pub active_projects: u32,
+    pub avg_efficiency: Option<f64>,
+}
+
+/// Daily aggregate results from SQL query
+#[derive(Debug, Clone)]
+pub struct DailyAggregates {
+    pub date: String,
+    pub session_count: u32,
+    pub total_turns: u32,
+    pub total_cost: f64,
+    pub total_tokens: u64,
+}
+
+/// Project aggregate results from SQL query
+#[derive(Debug, Clone)]
+pub struct ProjectAggregates {
+    pub project_path: String,
+    pub project_name: String,
+    pub session_count: u32,
+    pub total_cost: f64,
+    pub total_turns: u32,
+    pub total_tokens: u64,
+    pub last_activity: String,
+}
+
 /// Cached session data from database including mtime for validation
 #[derive(Debug, Clone)]
 pub struct CachedSessionData {
@@ -554,4 +587,133 @@ pub fn upsert_session_with_mtime(
         ],
     )?;
     Ok(())
+}
+
+/// Dashboard aggregate: total_sessions, total_cost, total_turns, total_tokens, active_projects
+/// Filters to real user projects (project_path LIKE '/Users/%') and sessions with turns > 0
+pub fn get_dashboard_summary_from_db(conn: &Connection) -> Result<DashboardAggregates, DbError> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+            COUNT(*) as total_sessions,
+            COALESCE(SUM(m.total_cost), 0.0) as total_cost,
+            COALESCE(SUM(m.total_turns), 0) as total_turns,
+            COALESCE(SUM(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write), 0) as total_tokens,
+            COUNT(DISTINCT s.project_path) as active_projects
+        FROM sessions s
+        LEFT JOIN session_metrics m ON s.session_id = m.session_id
+        WHERE s.project_path LIKE '/Users/%'
+          AND COALESCE(m.total_turns, 0) > 0
+        "#,
+    )?;
+
+    let (total_sessions, total_cost, total_turns, total_tokens, active_projects) = stmt.query_row([], |row| {
+        Ok((
+            row.get::<_, i32>(0)? as u32,
+            row.get::<_, f64>(1)?,
+            row.get::<_, i32>(2)? as u32,
+            row.get::<_, i64>(3)? as u64,
+            row.get::<_, i32>(4)? as u32,
+        ))
+    })?;
+
+    // Compute avg_efficiency from cache_read / (cache_read + cache_write) for sessions with cache data
+    let avg_efficiency: Option<f64> = conn.query_row(
+        r#"
+        SELECT AVG(
+            CAST(m.total_cache_read AS REAL) / (m.total_cache_read + m.total_cache_write)
+        )
+        FROM sessions s
+        LEFT JOIN session_metrics m ON s.session_id = m.session_id
+        WHERE s.project_path LIKE '/Users/%'
+          AND COALESCE(m.total_turns, 0) > 0
+          AND (m.total_cache_read + m.total_cache_write) > 0
+        "#,
+        [],
+        |row| row.get::<_, Option<f64>>(0),
+    )?;
+
+    Ok(DashboardAggregates {
+        total_sessions,
+        total_cost,
+        total_turns,
+        total_tokens,
+        active_projects,
+        avg_efficiency,
+    })
+}
+
+/// Daily metrics aggregate grouped by date, filtered to recent N days
+pub fn get_daily_metrics_from_db(conn: &Connection, days: u32) -> Result<Vec<DailyAggregates>, DbError> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+            DATE(s.started_at) as day,
+            COUNT(*) as session_count,
+            COALESCE(SUM(m.total_turns), 0) as total_turns,
+            COALESCE(SUM(m.total_cost), 0.0) as total_cost,
+            COALESCE(SUM(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write), 0) as total_tokens
+        FROM sessions s
+        LEFT JOIN session_metrics m ON s.session_id = m.session_id
+        WHERE s.project_path LIKE '/Users/%'
+          AND COALESCE(m.total_turns, 0) > 0
+          AND s.started_at >= date('now', '-' || ?1 || ' days')
+        GROUP BY DATE(s.started_at)
+        ORDER BY day DESC
+        "#,
+    )?;
+
+    let rows = stmt.query_map(params![days], |row| {
+        Ok(DailyAggregates {
+            date: row.get(0)?,
+            session_count: row.get::<_, i32>(1)? as u32,
+            total_turns: row.get::<_, i32>(2)? as u32,
+            total_cost: row.get::<_, f64>(3)?,
+            total_tokens: row.get::<_, i64>(4)? as u64,
+        })
+    })?;
+
+    let result = rows.collect::<Result<Vec<_>, _>>()?;
+    Ok(result)
+}
+
+/// Project metrics aggregate grouped by project_path
+pub fn get_project_metrics_from_db(conn: &Connection) -> Result<Vec<ProjectAggregates>, DbError> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+            s.project_path,
+            COUNT(*) as session_count,
+            COALESCE(SUM(m.total_cost), 0.0) as total_cost,
+            COALESCE(SUM(m.total_turns), 0) as total_turns,
+            COALESCE(SUM(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write), 0) as total_tokens,
+            MAX(s.last_activity_at) as last_activity
+        FROM sessions s
+        LEFT JOIN session_metrics m ON s.session_id = m.session_id
+        WHERE s.project_path LIKE '/Users/%'
+          AND COALESCE(m.total_turns, 0) > 0
+        GROUP BY s.project_path
+        "#,
+    )?;
+
+    let rows = stmt.query_map([], |row| {
+        let project_path: String = row.get(0)?;
+        let project_name = project_path
+            .rsplit('/')
+            .next()
+            .unwrap_or(&project_path)
+            .to_string();
+        Ok(ProjectAggregates {
+            project_path,
+            project_name,
+            session_count: row.get::<_, i32>(1)? as u32,
+            total_cost: row.get::<_, f64>(2)?,
+            total_turns: row.get::<_, i32>(3)? as u32,
+            total_tokens: row.get::<_, i64>(4)? as u64,
+            last_activity: row.get::<_, String>(5).unwrap_or_default(),
+        })
+    })?;
+
+    let result = rows.collect::<Result<Vec<_>, _>>()?;
+    Ok(result)
 }

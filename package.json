@@ -17,7 +17,10 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "tauri:build:debug": "tauri build --debug"
+    "tauri:build:debug": "tauri build --debug",
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test",
+    "test:rust": "cd src-tauri && cargo test --lib"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.1",

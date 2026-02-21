@@ -1181,10 +1181,10 @@ pub async fn preload_all_sessions(
         cache.last_refresh = Instant::now();
     }
 
-    // Step 3: For each session, check DB cache validity and load/parse as needed
+    // Step 3: Process sessions - cache hits immediately, collect misses for parallel parsing
     let mut cache_hits = 0;
-    let mut cache_misses = 0;
-    let preload_limit = 500; // Preload up to 500 most recent sessions
+    let mut cache_misses_list: Vec<SessionFileInfo> = Vec::new();
+    let preload_limit = 500;
 
     for session in file_sessions.iter().take(preload_limit) {
         let current_mtime = get_file_mtime(&session.path);
@@ -1197,10 +1197,7 @@ pub async fn preload_all_sessions(
             };
 
             if mtime_matches {
-                // Cache hit - use DB data directly without parsing
                 cache_hits += 1;
-
-                // Convert DB cache to our SessionSummary format and cache in memory
                 let summary = convert_db_cache_to_summary(cached, session);
                 if let Ok(mut list_cache) = SESSION_LIST_CACHE.write() {
                     list_cache.summaries.insert(session.session_id.clone(), summary);
@@ -1209,25 +1206,46 @@ pub async fn preload_all_sessions(
             }
         }
 
-        // Cache miss or stale - parse JSONL and store to DB
-        cache_misses += 1;
-        let summary = compute_session_summary(session);
+        cache_misses_list.push(session.clone());
+    }
 
-        // Store to DB for next startup
-        if let Some(ref mtime) = current_mtime {
-            // Compute tokens for DB storage (avoid fabrication)
-            let session_tokens = if let Ok((turns, _)) = get_session_turns(&session.session_id) {
-                let (tokens, _, _, _, _, _, _) = calculate_metrics_from_turns(&turns);
-                tokens
-            } else {
-                SessionTokens::new()
-            };
-            store_session_to_db(&state, session, &summary, &session_tokens, mtime);
+    // Step 4: Parse cache misses in parallel (up to 8 concurrent)
+    let cache_misses = cache_misses_list.len();
+    if !cache_misses_list.is_empty() {
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(8));
+        let mut handles = Vec::new();
+
+        for session in cache_misses_list {
+            let sem = semaphore.clone();
+            let handle = tokio::spawn(async move {
+                let _permit = sem.acquire_owned().await.unwrap();
+                tokio::task::spawn_blocking(move || {
+                    let current_mtime = get_file_mtime(&session.path);
+                    let summary = compute_session_summary(&session);
+
+                    let session_tokens = if let Ok((turns, _)) = get_session_turns(&session.session_id) {
+                        let (tokens, _, _, _, _, _, _) = calculate_metrics_from_turns(&turns);
+                        tokens
+                    } else {
+                        SessionTokens::new()
+                    };
+
+                    (session, summary, session_tokens, current_mtime)
+                }).await
+            });
+            handles.push(handle);
         }
 
-        // Cache in memory
-        if let Ok(mut list_cache) = SESSION_LIST_CACHE.write() {
-            list_cache.summaries.insert(session.session_id.clone(), summary);
+        // Collect results and store to DB + memory cache
+        for handle in handles {
+            if let Ok(Ok((session, summary, session_tokens, current_mtime))) = handle.await {
+                if let Some(ref mtime) = current_mtime {
+                    store_session_to_db(&state, &session, &summary, &session_tokens, mtime);
+                }
+                if let Ok(mut list_cache) = SESSION_LIST_CACHE.write() {
+                    list_cache.summaries.insert(session.session_id.clone(), summary);
+                }
+            }
         }
     }
 
@@ -2208,13 +2226,36 @@ pub struct ProjectMetricsResponse {
 /// without re-scanning the filesystem on every call.
 #[tauri::command]
 pub async fn get_dashboard_summary(
-    _state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, AppState>,
     limit: Option<u32>,
 ) -> Result<DashboardSummaryResponse, CommandError> {
     // Return cached result if still valid (TTL 30s)
     if let Ok(cache) = DASHBOARD_CACHE.lock() {
         if let Some(cached) = cache.get() {
             return Ok(cached);
+        }
+    }
+
+    // Try DB aggregate query (milliseconds, no JSONL parsing)
+    if let Some(db) = state.db.get() {
+        if let Ok(agg) = db.with_connection(|conn| {
+            db::queries::get_dashboard_summary_from_db(conn)
+        }) {
+            let result = DashboardSummaryResponse {
+                total_sessions: agg.total_sessions,
+                total_cost: agg.total_cost,
+                total_turns: agg.total_turns,
+                total_tokens: agg.total_tokens,
+                avg_cost_per_session: if agg.total_sessions > 0 { agg.total_cost / agg.total_sessions as f64 } else { 0.0 },
+                avg_turns_per_session: if agg.total_sessions > 0 { agg.total_turns as f64 / agg.total_sessions as f64 } else { 0.0 },
+                avg_efficiency_score: agg.avg_efficiency,
+                active_projects: agg.active_projects,
+            };
+            // Store in cache
+            if let Ok(mut cache) = DASHBOARD_CACHE.lock() {
+                cache.set(result.clone());
+            }
+            return Ok(result);
         }
     }
 
@@ -2304,7 +2345,7 @@ pub async fn get_dashboard_summary(
 /// Returns aggregated metrics grouped by day using cached session data.
 #[tauri::command]
 pub async fn get_daily_metrics(
-    _state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, AppState>,
     days: Option<u32>,
 ) -> Result<Vec<DailyMetricsResponse>, CommandError> {
     if let Ok(cache) = DAILY_CACHE.lock() {
@@ -2314,6 +2355,32 @@ pub async fn get_daily_metrics(
     }
 
     let days = days.unwrap_or(30);
+
+    // Try DB aggregate query (milliseconds, no JSONL parsing)
+    if let Some(db) = state.db.get() {
+        if let Ok(daily) = db.with_connection(|conn| {
+            db::queries::get_daily_metrics_from_db(conn, days)
+        }) {
+            if !daily.is_empty() {
+                let mut result: Vec<DailyMetricsResponse> = daily.into_iter().map(|d| {
+                    DailyMetricsResponse {
+                        date: d.date,
+                        session_count: d.session_count,
+                        total_turns: d.total_turns,
+                        total_cost: d.total_cost,
+                        total_tokens: d.total_tokens,
+                        avg_efficiency_score: None,
+                    }
+                }).collect();
+                result.sort_by(|a, b| b.date.cmp(&a.date));
+                if let Ok(mut cache) = DAILY_CACHE.lock() {
+                    cache.set(result.clone());
+                }
+                return Ok(result);
+            }
+        }
+    }
+
     let cutoff = chrono::Utc::now() - chrono::Duration::days(days as i64);
 
     // Use cached session list
@@ -2405,12 +2472,39 @@ pub async fn get_daily_metrics(
 /// Returns metrics grouped by project path using cached session data.
 #[tauri::command]
 pub async fn get_project_metrics(
-    _state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, AppState>,
     limit: Option<u32>,
 ) -> Result<Vec<ProjectMetricsResponse>, CommandError> {
     if let Ok(cache) = PROJECT_CACHE.lock() {
         if let Some(cached) = cache.get() {
             return Ok(cached);
+        }
+    }
+
+    // Try DB aggregate query (milliseconds, no JSONL parsing)
+    if let Some(db) = state.db.get() {
+        if let Ok(projects) = db.with_connection(|conn| {
+            db::queries::get_project_metrics_from_db(conn)
+        }) {
+            if !projects.is_empty() {
+                let mut result: Vec<ProjectMetricsResponse> = projects.into_iter().map(|p| {
+                    ProjectMetricsResponse {
+                        project_path: p.project_path,
+                        project_name: p.project_name,
+                        session_count: p.session_count,
+                        total_cost: p.total_cost,
+                        total_turns: p.total_turns,
+                        total_tokens: p.total_tokens,
+                        avg_cost_per_session: if p.session_count > 0 { p.total_cost / p.session_count as f64 } else { 0.0 },
+                        last_activity: p.last_activity,
+                    }
+                }).collect();
+                result.sort_by(|a, b| b.total_cost.partial_cmp(&a.total_cost).unwrap_or(std::cmp::Ordering::Equal));
+                if let Ok(mut cache) = PROJECT_CACHE.lock() {
+                    cache.set(result.clone());
+                }
+                return Ok(result);
+            }
         }
     }
 

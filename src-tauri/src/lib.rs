@@ -108,12 +108,6 @@ pub fn run() {
         }
     };
 
-    tracing::info!("Scanning for sessions in ~/.claude/projects/");
-
-    // Do initial session scan on startup
-    let session_count = parser::scan_claude_sessions().len();
-    tracing::info!("Found {} session files", session_count);
-
     tauri::Builder::default()
         .manage(app_state)
         .plugin(tauri_plugin_shell::init())
@@ -155,9 +149,14 @@ pub fn run() {
             commands::detect_antipatterns,
         ])
         .setup(|app| {
-            // Spawn background task to watch for new sessions
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
+                // Do initial session scan in background (non-blocking)
+                tracing::info!("Scanning for sessions in ~/.claude/projects/");
+                let session_count = crate::parser::scan_claude_sessions().len();
+                tracing::info!("Found {} session files", session_count);
+
+                // Then start watching for changes
                 session_watcher_task(app_handle);
             });
             Ok(())
