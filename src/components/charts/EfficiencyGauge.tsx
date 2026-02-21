@@ -1,10 +1,40 @@
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../ui/Card';
 
 interface EfficiencyGaugeProps {
-  value: number; // 0-100
+  value: number; // 0-100 (percentage)
   label: string;
   description?: string;
   isLoading?: boolean;
+}
+
+/** Return an interpretive label and description for the given CER percentage. */
+function getEfficiencyInsight(pct: number): { rating: string; detail: string; color: string } {
+  if (pct >= 80) {
+    return {
+      rating: 'Excellent',
+      detail: 'Highly optimized cache usage',
+      color: 'text-green-400',
+    };
+  }
+  if (pct >= 60) {
+    return {
+      rating: 'Good',
+      detail: 'Effective prompt caching',
+      color: 'text-green-400',
+    };
+  }
+  if (pct >= 30) {
+    return {
+      rating: 'Moderate',
+      detail: 'Reasonable cache reuse',
+      color: 'text-yellow-400',
+    };
+  }
+  return {
+    rating: 'Low',
+    detail: 'Sessions are rebuilding context frequently',
+    color: 'text-red-400',
+  };
 }
 
 export function EfficiencyGauge({ value, label, description, isLoading }: EfficiencyGaugeProps) {
@@ -35,6 +65,8 @@ export function EfficiencyGauge({ value, label, description, isLoading }: Effici
   } else if (normalizedValue >= 25) {
     color = '#f97316'; // orange
   }
+
+  const insight = getEfficiencyInsight(normalizedValue);
 
   return (
     <Card>
@@ -77,6 +109,16 @@ export function EfficiencyGauge({ value, label, description, isLoading }: Effici
             </span>
           </div>
         </div>
+
+        {/* Rating label */}
+        <p className={`mt-2 text-sm font-medium ${insight.color}`}>
+          {insight.rating} — {insight.detail}
+        </p>
+
+        {/* Educational description */}
+        <p className="mt-2 max-w-[220px] text-center text-xs text-gray-500">
+          Cache Efficiency Ratio (CER) measures how effectively your sessions reuse cached context. Higher is better.
+        </p>
       </CardContent>
     </Card>
   );

@@ -8,10 +8,23 @@ A native desktop application for analyzing Claude Code sessions with deep insigh
 
 ## Features
 
+### Performance
+- **Sub-second cold start**: Dashboard loads instantly via SQL aggregate queries -- no JSONL parsing on startup
+- **Non-blocking startup**: Session scan runs in a background thread; the window appears immediately
+- **Parallel preload**: 8-permit semaphore for concurrent session cache population
+- **Two-phase preload**: Phase 1 loads the 500 most recent sessions for an instant dashboard; Phase 2 backfills all remaining sessions in the background
+
 ### Dashboard
 - **Session Overview**: View all your Claude Code sessions at a glance
 - **Key Metrics**: Track token usage, costs, conversation patterns, and tool interactions
-- **Time-based Analysis**: Filter sessions by date range and see trends over time
+- **Time-based Analysis**: Filter sessions by date range (7d/30d/90d/All) and see trends over time
+- **Efficiency Gauge**: Global Cache Efficiency Ratio (CER) weighted by actual cache usage, with educational description
+
+### Session & User Analytics
+- **User vs Subagent Sessions**: Separate tracking and charting for user-initiated and subagent sessions
+- **Dual-axis Trends**: Sessions Per Day chart with user session bars (left axis) and subagent session line (right axis)
+- **Consistent Numbers**: Dashboard and Timeline summary cards use the same backend aggregates
+- **Sticky Headers**: All pages feature a sticky header for easy navigation
 
 ### Session Analysis
 - **Conversation Timeline**: Visualize the flow of your coding sessions
@@ -23,6 +36,10 @@ A native desktop application for analyzing Claude Code sessions with deep insigh
 - **Behavior Patterns**: Identify common interaction patterns
 - **Performance Metrics**: Track response times and session efficiency
 - **Recommendation Engine**: Get actionable suggestions to improve your workflow
+
+### CI/CD
+- **Automated CI pipeline**: Lint, typecheck, Rust tests, and frontend build jobs on every push
+- **Release workflow**: Automated cross-platform builds with test gates
 
 ### Data Export
 - Export session data to CSV for further analysis
@@ -137,6 +154,11 @@ bun run tauri:dev     # Start Tauri in dev mode
 bun run build         # Build frontend only
 bun run tauri:build   # Build complete app
 bun run tauri:build:debug  # Build with debug symbols
+
+# Testing & Quality
+bun run typecheck     # TypeScript type checking
+bun run test:e2e      # Run Playwright E2E tests
+bun run test:rust     # Run Rust backend tests
 
 # Other
 bun run preview       # Preview built frontend

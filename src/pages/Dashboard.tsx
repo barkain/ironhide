@@ -80,7 +80,10 @@ function Dashboard() {
   const { data: recentSessions, isLoading: sessionsLoading } = useSessions(5, 0);
 
   // Calculate average efficiency from recent sessions if available
-  const avgEfficiency = summary?.avg_efficiency_score;
+  // Backend returns CER as 0-1 ratio; convert to percentage for the gauge (0-100)
+  const avgEfficiency = summary?.avg_efficiency_score != null
+    ? summary.avg_efficiency_score * 100
+    : null;
 
   return (
     <div className="flex flex-col">

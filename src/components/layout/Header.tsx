@@ -1,8 +1,9 @@
+import { useMemo } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { DateRangePicker } from '../ui/DateRangePicker';
 import { TimeRangeFilter } from '../ui/TimeRangeFilter';
-import { useRefreshData, useLastSyncTime } from '../../hooks/useMetrics';
+import { useRefreshData, useLastSyncTime, useDailyMetrics } from '../../hooks/useMetrics';
 import { useAppStore } from '../../lib/store';
 import { formatRelativeTime } from '../../lib/utils';
 
@@ -17,9 +18,17 @@ export function Header({ title, subtitle, showDateFilter = true, showQuickFilter
   const { mutate: refresh, isPending } = useRefreshData();
   const { data: lastSyncTime } = useLastSyncTime();
   const { dateRange, setDateRange, presetRange, setPresetRange } = useAppStore();
+  const { data: dailyMetrics } = useDailyMetrics();
+
+  // Compute the earliest date from daily metrics for "All" range display
+  const earliestDate = useMemo(() => {
+    if (!dailyMetrics || dailyMetrics.length === 0) return undefined;
+    // Daily metrics are date-sorted; the first entry has the earliest date
+    return dailyMetrics[0].date;
+  }, [dailyMetrics]);
 
   return (
-    <header className="flex h-16 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-6">
+    <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-6">
       <div>
         <h1 className="text-xl font-semibold text-white">{title}</h1>
         {subtitle && <p className="text-sm text-gray-400">{subtitle}</p>}
@@ -33,6 +42,7 @@ export function Header({ title, subtitle, showDateFilter = true, showQuickFilter
             onChange={setDateRange}
             presetRange={presetRange}
             onPresetChange={setPresetRange}
+            earliestDate={earliestDate}
           />
         )}
 

@@ -120,6 +120,8 @@ export interface TurnTokens {
 /** Dashboard summary metrics */
 export interface DashboardSummary {
   total_sessions: number;
+  user_sessions: number;
+  subagent_sessions: number;
   total_cost: number;
   total_turns: number;
   total_tokens: number;
@@ -133,6 +135,8 @@ export interface DashboardSummary {
 export interface DailyMetrics {
   date: string;
   session_count: number;
+  user_session_count: number;
+  subagent_session_count: number;
   total_turns: number;
   total_cost: number;
   total_tokens: number;

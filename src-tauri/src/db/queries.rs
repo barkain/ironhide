@@ -13,6 +13,8 @@ use crate::models::metrics::SessionMetrics;
 #[derive(Debug, Clone)]
 pub struct DashboardAggregates {
     pub total_sessions: u32,
+    pub user_sessions: u32,
+    pub subagent_sessions: u32,
     pub total_cost: f64,
     pub total_turns: u32,
     pub total_tokens: u64,
@@ -25,9 +27,12 @@ pub struct DashboardAggregates {
 pub struct DailyAggregates {
     pub date: String,
     pub session_count: u32,
+    pub user_session_count: u32,
+    pub subagent_session_count: u32,
     pub total_turns: u32,
     pub total_cost: f64,
     pub total_tokens: u64,
+    pub avg_efficiency: Option<f64>,
 }
 
 /// Project aggregate results from SQL query
@@ -440,6 +445,262 @@ pub fn get_all_cached_sessions(conn: &Connection) -> Result<Vec<SessionSummary>,
     Ok(sessions)
 }
 
+/// Frontend session summary - contains all fields needed by the commands::SessionSummary struct.
+/// This avoids the need to parse JSONL files when the DB already has the data.
+#[derive(Debug, Clone)]
+pub struct FrontendSessionSummary {
+    pub session_id: String,
+    pub project_path: String,
+    pub project_name: String,
+    pub started_at: String,
+    pub last_activity_at: Option<String>,
+    pub model: Option<String>,
+    pub total_cost: f64,
+    pub total_turns: u32,
+    pub total_tokens: u64,
+    pub duration_ms: u64,
+    pub is_subagent: bool,
+    pub file_path: String,
+}
+
+/// Get all sessions from the DB with fields needed for the frontend SessionSummary.
+/// This is the fast path that avoids JSONL parsing.
+/// Sessions are returned sorted by last_activity_at DESC.
+pub fn get_sessions_for_frontend(
+    conn: &Connection,
+    limit: usize,
+    offset: usize,
+) -> Result<Vec<FrontendSessionSummary>, DbError> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+            s.session_id,
+            s.project_path,
+            s.project_name,
+            s.started_at,
+            s.last_activity_at,
+            s.model,
+            s.file_path,
+            COALESCE(m.total_turns, 0) as total_turns,
+            COALESCE(m.total_cost, 0.0) as total_cost,
+            COALESCE(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write, 0) as total_tokens,
+            COALESCE(m.total_duration_ms, 0) as duration_ms
+        FROM sessions s
+        LEFT JOIN session_metrics m ON s.session_id = m.session_id
+        WHERE COALESCE(m.total_turns, 0) > 0
+        ORDER BY s.last_activity_at DESC
+        LIMIT ?1 OFFSET ?2
+        "#,
+    )?;
+
+    let sessions = stmt
+        .query_map(params![limit as i64, offset as i64], |row| {
+            let file_path: String = row.get(6)?;
+            let is_subagent = file_path.contains("subagent");
+            Ok(FrontendSessionSummary {
+                session_id: row.get(0)?,
+                project_path: row.get(1)?,
+                project_name: row.get(2)?,
+                started_at: row.get(3)?,
+                last_activity_at: row.get::<_, Option<String>>(4)?,
+                model: row.get::<_, Option<String>>(5)?,
+                file_path,
+                total_turns: row.get::<_, i32>(7)? as u32,
+                total_cost: row.get(8)?,
+                total_tokens: row.get::<_, i64>(9)? as u64,
+                duration_ms: row.get::<_, i64>(10)? as u64,
+                is_subagent,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(sessions)
+}
+
+/// Get sessions from the DB filtered by date range, with fields needed for the frontend.
+/// This is the fast path that avoids JSONL parsing.
+pub fn get_sessions_for_frontend_filtered(
+    conn: &Connection,
+    start_date: Option<&str>,
+    end_date: Option<&str>,
+    limit: usize,
+    offset: usize,
+) -> Result<Vec<FrontendSessionSummary>, DbError> {
+    // Build query dynamically based on which date filters are provided
+    let mut sql = String::from(
+        r#"
+        SELECT
+            s.session_id,
+            s.project_path,
+            s.project_name,
+            s.started_at,
+            s.last_activity_at,
+            s.model,
+            s.file_path,
+            COALESCE(m.total_turns, 0) as total_turns,
+            COALESCE(m.total_cost, 0.0) as total_cost,
+            COALESCE(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write, 0) as total_tokens,
+            COALESCE(m.total_duration_ms, 0) as duration_ms
+        FROM sessions s
+        LEFT JOIN session_metrics m ON s.session_id = m.session_id
+        WHERE COALESCE(m.total_turns, 0) > 0
+        "#,
+    );
+
+    if start_date.is_some() {
+        sql.push_str(" AND substr(s.started_at, 1, 10) >= ?3");
+    }
+    if end_date.is_some() {
+        sql.push_str(if start_date.is_some() {
+            " AND substr(s.started_at, 1, 10) <= ?4"
+        } else {
+            " AND substr(s.started_at, 1, 10) <= ?3"
+        });
+    }
+
+    sql.push_str(" ORDER BY s.last_activity_at DESC LIMIT ?1 OFFSET ?2");
+
+    let mut stmt = conn.prepare(&sql)?;
+
+    // Bind parameters dynamically
+    let rows: Vec<FrontendSessionSummary> = match (start_date, end_date) {
+        (Some(start), Some(end)) => {
+            stmt.query_map(params![limit as i64, offset as i64, start, end], |row| {
+                let file_path: String = row.get(6)?;
+                let is_subagent = file_path.contains("subagent");
+                Ok(FrontendSessionSummary {
+                    session_id: row.get(0)?,
+                    project_path: row.get(1)?,
+                    project_name: row.get(2)?,
+                    started_at: row.get(3)?,
+                    last_activity_at: row.get::<_, Option<String>>(4)?,
+                    model: row.get::<_, Option<String>>(5)?,
+                    file_path,
+                    total_turns: row.get::<_, i32>(7)? as u32,
+                    total_cost: row.get(8)?,
+                    total_tokens: row.get::<_, i64>(9)? as u64,
+                    duration_ms: row.get::<_, i64>(10)? as u64,
+                    is_subagent,
+                })
+            })?.collect::<Result<Vec<_>, _>>()?
+        }
+        (Some(start), None) => {
+            stmt.query_map(params![limit as i64, offset as i64, start], |row| {
+                let file_path: String = row.get(6)?;
+                let is_subagent = file_path.contains("subagent");
+                Ok(FrontendSessionSummary {
+                    session_id: row.get(0)?,
+                    project_path: row.get(1)?,
+                    project_name: row.get(2)?,
+                    started_at: row.get(3)?,
+                    last_activity_at: row.get::<_, Option<String>>(4)?,
+                    model: row.get::<_, Option<String>>(5)?,
+                    file_path,
+                    total_turns: row.get::<_, i32>(7)? as u32,
+                    total_cost: row.get(8)?,
+                    total_tokens: row.get::<_, i64>(9)? as u64,
+                    duration_ms: row.get::<_, i64>(10)? as u64,
+                    is_subagent,
+                })
+            })?.collect::<Result<Vec<_>, _>>()?
+        }
+        (None, Some(end)) => {
+            stmt.query_map(params![limit as i64, offset as i64, end], |row| {
+                let file_path: String = row.get(6)?;
+                let is_subagent = file_path.contains("subagent");
+                Ok(FrontendSessionSummary {
+                    session_id: row.get(0)?,
+                    project_path: row.get(1)?,
+                    project_name: row.get(2)?,
+                    started_at: row.get(3)?,
+                    last_activity_at: row.get::<_, Option<String>>(4)?,
+                    model: row.get::<_, Option<String>>(5)?,
+                    file_path,
+                    total_turns: row.get::<_, i32>(7)? as u32,
+                    total_cost: row.get(8)?,
+                    total_tokens: row.get::<_, i64>(9)? as u64,
+                    duration_ms: row.get::<_, i64>(10)? as u64,
+                    is_subagent,
+                })
+            })?.collect::<Result<Vec<_>, _>>()?
+        }
+        (None, None) => {
+            stmt.query_map(params![limit as i64, offset as i64], |row| {
+                let file_path: String = row.get(6)?;
+                let is_subagent = file_path.contains("subagent");
+                Ok(FrontendSessionSummary {
+                    session_id: row.get(0)?,
+                    project_path: row.get(1)?,
+                    project_name: row.get(2)?,
+                    started_at: row.get(3)?,
+                    last_activity_at: row.get::<_, Option<String>>(4)?,
+                    model: row.get::<_, Option<String>>(5)?,
+                    file_path,
+                    total_turns: row.get::<_, i32>(7)? as u32,
+                    total_cost: row.get(8)?,
+                    total_tokens: row.get::<_, i64>(9)? as u64,
+                    duration_ms: row.get::<_, i64>(10)? as u64,
+                    is_subagent,
+                })
+            })?.collect::<Result<Vec<_>, _>>()?
+        }
+    };
+
+    Ok(rows)
+}
+
+/// Get sessions from the DB for a specific project path, with fields needed for the frontend.
+/// This is the fast path that avoids JSONL parsing.
+pub fn get_sessions_for_frontend_by_project(
+    conn: &Connection,
+    project_path: &str,
+) -> Result<Vec<FrontendSessionSummary>, DbError> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+            s.session_id,
+            s.project_path,
+            s.project_name,
+            s.started_at,
+            s.last_activity_at,
+            s.model,
+            s.file_path,
+            COALESCE(m.total_turns, 0) as total_turns,
+            COALESCE(m.total_cost, 0.0) as total_cost,
+            COALESCE(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write, 0) as total_tokens,
+            COALESCE(m.total_duration_ms, 0) as duration_ms
+        FROM sessions s
+        LEFT JOIN session_metrics m ON s.session_id = m.session_id
+        WHERE s.project_path = ?1
+          AND COALESCE(m.total_turns, 0) > 0
+        ORDER BY s.last_activity_at DESC
+        "#,
+    )?;
+
+    let sessions = stmt
+        .query_map(params![project_path], |row| {
+            let file_path: String = row.get(6)?;
+            let is_subagent = file_path.contains("subagent");
+            Ok(FrontendSessionSummary {
+                session_id: row.get(0)?,
+                project_path: row.get(1)?,
+                project_name: row.get(2)?,
+                started_at: row.get(3)?,
+                last_activity_at: row.get::<_, Option<String>>(4)?,
+                model: row.get::<_, Option<String>>(5)?,
+                file_path,
+                total_turns: row.get::<_, i32>(7)? as u32,
+                total_cost: row.get(8)?,
+                total_tokens: row.get::<_, i64>(9)? as u64,
+                duration_ms: row.get::<_, i64>(10)? as u64,
+                is_subagent,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(sessions)
+}
+
 /// Check if a session exists in the database
 pub fn session_exists(conn: &Connection, session_id: &str) -> Result<bool, DbError> {
     let count: i32 = conn.query_row(
@@ -590,12 +851,23 @@ pub fn upsert_session_with_mtime(
 }
 
 /// Dashboard aggregate: total_sessions, total_cost, total_turns, total_tokens, active_projects
-/// Filters to real user projects (project_path LIKE '/Users/%') and sessions with turns > 0
-pub fn get_dashboard_summary_from_db(conn: &Connection) -> Result<DashboardAggregates, DbError> {
-    let mut stmt = conn.prepare(
+/// Filters to real user projects (project_path LIKE '/Users/%') and sessions with turns > 0.
+/// When `days` is Some, only includes sessions from the last N days.
+/// Uses substr() for date comparisons to handle RFC3339 timestamps safely,
+/// and guards against non-date values (e.g. 'unknown') with a LIKE '20%' check.
+pub fn get_dashboard_summary_from_db(conn: &Connection, days: Option<u32>) -> Result<DashboardAggregates, DbError> {
+    let date_filter = if days.is_some() {
+        "AND s.started_at LIKE '20%' AND substr(s.started_at, 1, 10) >= date('now', '-' || ?1 || ' days')"
+    } else {
+        ""
+    };
+
+    let sql = format!(
         r#"
         SELECT
             COUNT(*) as total_sessions,
+            COUNT(CASE WHEN s.file_path NOT LIKE '%/subagents/%' AND s.file_path NOT LIKE '%/agent-%' THEN 1 END) as user_sessions,
+            COUNT(CASE WHEN s.file_path LIKE '%/subagents/%' OR s.file_path LIKE '%/agent-%' THEN 1 END) as subagent_sessions,
             COALESCE(SUM(m.total_cost), 0.0) as total_cost,
             COALESCE(SUM(m.total_turns), 0) as total_turns,
             COALESCE(SUM(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write), 0) as total_tokens,
@@ -604,37 +876,65 @@ pub fn get_dashboard_summary_from_db(conn: &Connection) -> Result<DashboardAggre
         LEFT JOIN session_metrics m ON s.session_id = m.session_id
         WHERE s.project_path LIKE '/Users/%'
           AND COALESCE(m.total_turns, 0) > 0
+          {date_filter}
         "#,
-    )?;
+    );
 
-    let (total_sessions, total_cost, total_turns, total_tokens, active_projects) = stmt.query_row([], |row| {
-        Ok((
-            row.get::<_, i32>(0)? as u32,
-            row.get::<_, f64>(1)?,
-            row.get::<_, i32>(2)? as u32,
-            row.get::<_, i64>(3)? as u64,
-            row.get::<_, i32>(4)? as u32,
-        ))
-    })?;
+    let mut stmt = conn.prepare(&sql)?;
 
-    // Compute avg_efficiency from cache_read / (cache_read + cache_write) for sessions with cache data
-    let avg_efficiency: Option<f64> = conn.query_row(
+    let (total_sessions, user_sessions, subagent_sessions, total_cost, total_turns, total_tokens, active_projects) = if let Some(d) = days {
+        stmt.query_row(params![d], |row| {
+            Ok((
+                row.get::<_, i32>(0)? as u32,
+                row.get::<_, i32>(1)? as u32,
+                row.get::<_, i32>(2)? as u32,
+                row.get::<_, f64>(3)?,
+                row.get::<_, i32>(4)? as u32,
+                row.get::<_, i64>(5)? as u64,
+                row.get::<_, i32>(6)? as u32,
+            ))
+        })?
+    } else {
+        stmt.query_row([], |row| {
+            Ok((
+                row.get::<_, i32>(0)? as u32,
+                row.get::<_, i32>(1)? as u32,
+                row.get::<_, i32>(2)? as u32,
+                row.get::<_, f64>(3)?,
+                row.get::<_, i32>(4)? as u32,
+                row.get::<_, i64>(5)? as u64,
+                row.get::<_, i32>(6)? as u32,
+            ))
+        })?
+    };
+
+    // Compute global CER = SUM(cache_read) / (SUM(cache_read) + SUM(cache_write))
+    // Using global totals instead of averaging per-session CERs avoids skew from
+    // many small sessions (e.g. subagents) with tiny or zero cache values.
+    let eff_sql = format!(
         r#"
-        SELECT AVG(
-            CAST(m.total_cache_read AS REAL) / (m.total_cache_read + m.total_cache_write)
-        )
+        SELECT
+            CASE WHEN SUM(m.total_cache_read) + SUM(m.total_cache_write) > 0
+            THEN CAST(SUM(m.total_cache_read) AS REAL) / (SUM(m.total_cache_read) + SUM(m.total_cache_write))
+            ELSE NULL END
         FROM sessions s
-        LEFT JOIN session_metrics m ON s.session_id = m.session_id
+        JOIN session_metrics m ON s.session_id = m.session_id
         WHERE s.project_path LIKE '/Users/%'
-          AND COALESCE(m.total_turns, 0) > 0
-          AND (m.total_cache_read + m.total_cache_write) > 0
+          AND m.total_turns > 0
+          {date_filter}
         "#,
-        [],
-        |row| row.get::<_, Option<f64>>(0),
-    )?;
+    );
+
+    let avg_efficiency: Option<f64> = if let Some(d) = days {
+        conn.query_row(&eff_sql, params![d], |row| row.get::<_, Option<f64>>(0))?
+    } else {
+        conn.query_row(&eff_sql, [], |row| row.get::<_, Option<f64>>(0))?
+    };
 
     Ok(DashboardAggregates {
         total_sessions,
+        user_sessions,
+        subagent_sessions,
         total_cost,
         total_turns,
         total_tokens,
@@ -643,43 +943,89 @@ pub fn get_dashboard_summary_from_db(conn: &Connection) -> Result<DashboardAggre
     })
 }
 
-/// Daily metrics aggregate grouped by date, filtered to recent N days
-pub fn get_daily_metrics_from_db(conn: &Connection, days: u32) -> Result<Vec<DailyAggregates>, DbError> {
-    let mut stmt = conn.prepare(
+/// Daily metrics aggregate grouped by date.
+/// When `days` is Some, only includes sessions from the last N days.
+/// When `days` is None, includes all sessions (no date filter).
+/// Uses substr() for date comparisons to handle RFC3339 timestamps safely,
+/// and guards against non-date values (e.g. 'unknown') with a LIKE '20%' check.
+pub fn get_daily_metrics_from_db(conn: &Connection, days: Option<u32>) -> Result<Vec<DailyAggregates>, DbError> {
+    let date_filter = if days.is_some() {
+        "AND substr(s.started_at, 1, 10) >= date('now', '-' || ?1 || ' days')"
+    } else {
+        ""
+    };
+
+    let sql = format!(
         r#"
         SELECT
-            DATE(s.started_at) as day,
+            substr(s.started_at, 1, 10) as day,
             COUNT(*) as session_count,
+            COUNT(CASE WHEN s.file_path NOT LIKE '%/subagents/%' AND s.file_path NOT LIKE '%/agent-%' THEN 1 END) as user_session_count,
+            COUNT(CASE WHEN s.file_path LIKE '%/subagents/%' OR s.file_path LIKE '%/agent-%' THEN 1 END) as subagent_session_count,
             COALESCE(SUM(m.total_turns), 0) as total_turns,
             COALESCE(SUM(m.total_cost), 0.0) as total_cost,
-            COALESCE(SUM(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write), 0) as total_tokens
+            COALESCE(SUM(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write), 0) as total_tokens,
+            CASE WHEN SUM(m.total_cache_read) + SUM(m.total_cache_write) > 0
+            THEN CAST(SUM(m.total_cache_read) AS REAL) / (SUM(m.total_cache_read) + SUM(m.total_cache_write))
+            ELSE NULL END as avg_efficiency
         FROM sessions s
         LEFT JOIN session_metrics m ON s.session_id = m.session_id
         WHERE s.project_path LIKE '/Users/%'
           AND COALESCE(m.total_turns, 0) > 0
-          AND s.started_at >= date('now', '-' || ?1 || ' days')
-        GROUP BY DATE(s.started_at)
+          AND s.started_at LIKE '20%'
+          {date_filter}
+        GROUP BY substr(s.started_at, 1, 10)
         ORDER BY day DESC
         "#,
-    )?;
+    );
 
-    let rows = stmt.query_map(params![days], |row| {
-        Ok(DailyAggregates {
-            date: row.get(0)?,
-            session_count: row.get::<_, i32>(1)? as u32,
-            total_turns: row.get::<_, i32>(2)? as u32,
-            total_cost: row.get::<_, f64>(3)?,
-            total_tokens: row.get::<_, i64>(4)? as u64,
-        })
-    })?;
+    let mut stmt = conn.prepare(&sql)?;
 
-    let result = rows.collect::<Result<Vec<_>, _>>()?;
+    let result = if let Some(d) = days {
+        let rows = stmt.query_map(params![d], |row| {
+            Ok(DailyAggregates {
+                date: row.get(0)?,
+                session_count: row.get::<_, i32>(1)? as u32,
+                user_session_count: row.get::<_, i32>(2)? as u32,
+                subagent_session_count: row.get::<_, i32>(3)? as u32,
+                total_turns: row.get::<_, i32>(4)? as u32,
+                total_cost: row.get::<_, f64>(5)?,
+                total_tokens: row.get::<_, i64>(6)? as u64,
+                avg_efficiency: row.get::<_, Option<f64>>(7)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    } else {
+        let rows = stmt.query_map([], |row| {
+            Ok(DailyAggregates {
+                date: row.get(0)?,
+                session_count: row.get::<_, i32>(1)? as u32,
+                user_session_count: row.get::<_, i32>(2)? as u32,
+                subagent_session_count: row.get::<_, i32>(3)? as u32,
+                total_turns: row.get::<_, i32>(4)? as u32,
+                total_cost: row.get::<_, f64>(5)?,
+                total_tokens: row.get::<_, i64>(6)? as u64,
+                avg_efficiency: row.get::<_, Option<f64>>(7)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+
     Ok(result)
 }
 
-/// Project metrics aggregate grouped by project_path
-pub fn get_project_metrics_from_db(conn: &Connection) -> Result<Vec<ProjectAggregates>, DbError> {
-    let mut stmt = conn.prepare(
+/// Project metrics aggregate grouped by project_path.
+/// When `days` is Some, only includes sessions from the last N days.
+/// Uses substr() for date comparisons to handle RFC3339 timestamps safely,
+/// and guards against non-date values (e.g. 'unknown') with a LIKE '20%' check.
+pub fn get_project_metrics_from_db(conn: &Connection, days: Option<u32>) -> Result<Vec<ProjectAggregates>, DbError> {
+    let date_filter = if days.is_some() {
+        "AND s.started_at LIKE '20%' AND substr(s.started_at, 1, 10) >= date('now', '-' || ?1 || ' days')"
+    } else {
+        ""
+    };
+
+    let sql = format!(
         r#"
         SELECT
             s.project_path,
@@ -692,28 +1038,50 @@ pub fn get_project_metrics_from_db(conn: &Connection) -> Result<Vec<ProjectAggre
         LEFT JOIN session_metrics m ON s.session_id = m.session_id
         WHERE s.project_path LIKE '/Users/%'
           AND COALESCE(m.total_turns, 0) > 0
+          {date_filter}
         GROUP BY s.project_path
         "#,
-    )?;
+    );
 
-    let rows = stmt.query_map([], |row| {
-        let project_path: String = row.get(0)?;
-        let project_name = project_path
-            .rsplit('/')
-            .next()
-            .unwrap_or(&project_path)
-            .to_string();
-        Ok(ProjectAggregates {
-            project_path,
-            project_name,
-            session_count: row.get::<_, i32>(1)? as u32,
-            total_cost: row.get::<_, f64>(2)?,
-            total_turns: row.get::<_, i32>(3)? as u32,
-            total_tokens: row.get::<_, i64>(4)? as u64,
-            last_activity: row.get::<_, String>(5).unwrap_or_default(),
-        })
-    })?;
+    let mut stmt = conn.prepare(&sql)?;
 
-    let result = rows.collect::<Result<Vec<_>, _>>()?;
-    Ok(result)
+    let rows = if let Some(d) = days {
+        stmt.query_map(params![d], |row| {
+            let project_path: String = row.get(0)?;
+            let project_name = project_path
+                .rsplit('/')
+                .next()
+                .unwrap_or(&project_path)
+                .to_string();
+            Ok(ProjectAggregates {
+                project_path,
+                project_name,
+                session_count: row.get::<_, i32>(1)? as u32,
+                total_cost: row.get::<_, f64>(2)?,
+                total_turns: row.get::<_, i32>(3)? as u32,
+                total_tokens: row.get::<_, i64>(4)? as u64,
+                last_activity: row.get::<_, String>(5).unwrap_or_default(),
+            })
+        })?.collect::<Result<Vec<_>, _>>()?
+    } else {
+        stmt.query_map([], |row| {
+            let project_path: String = row.get(0)?;
+            let project_name = project_path
+                .rsplit('/')
+                .next()
+                .unwrap_or(&project_path)
+                .to_string();
+            Ok(ProjectAggregates {
+                project_path,
+                project_name,
+                session_count: row.get::<_, i32>(1)? as u32,
+                total_cost: row.get::<_, f64>(2)?,
+                total_turns: row.get::<_, i32>(3)? as u32,
+                total_tokens: row.get::<_, i64>(4)? as u64,
+                last_activity: row.get::<_, String>(5).unwrap_or_default(),
+            })
+        })?.collect::<Result<Vec<_>, _>>()?
+    };
+
+    Ok(rows)
 }

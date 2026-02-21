@@ -13,6 +13,7 @@ interface TimeRangeFilterProps {
   onChange: (value: DateRangeValue | null) => void;
   presetRange: PresetRange;
   onPresetChange: (preset: PresetRange) => void;
+  earliestDate?: string;
   className?: string;
 }
 
@@ -50,6 +51,7 @@ export function TimeRangeFilter({
   onChange,
   presetRange,
   onPresetChange,
+  earliestDate,
   className,
 }: TimeRangeFilterProps) {
   const handlePresetClick = (preset: PresetRange) => {
@@ -58,9 +60,13 @@ export function TimeRangeFilter({
     onChange(range);
   };
 
+  const now = new Date();
+
   const displayText = value
     ? `${format(new Date(value.start), 'MMM d')} - ${format(new Date(value.end), 'MMM d, yyyy')}`
-    : 'All time';
+    : earliestDate
+      ? `${format(new Date(earliestDate), 'MMM d')} - ${format(now, 'MMM d, yyyy')}`
+      : null;
 
   return (
     <div className={cn('flex items-center gap-2', className)}>
@@ -83,7 +89,7 @@ export function TimeRangeFilter({
       </div>
 
       {/* Selected range text */}
-      {presetRange !== 'all' && (
+      {displayText && (
         <span className="text-xs text-gray-500 hidden sm:inline">
           {displayText}
         </span>

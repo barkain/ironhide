@@ -250,23 +250,25 @@ lazy_static::lazy_static! {
 ///
 /// Used to avoid recomputing expensive aggregate metrics (dashboard summary,
 /// daily metrics, project metrics) on every request. Each cached value is
-/// paired with the instant it was stored; reads return `None` once the TTL
-/// has elapsed, causing the next caller to recompute and refresh the cache.
+/// keyed by the `days` parameter (represented as Option<u32>) so that
+/// switching between time ranges (7d, 30d, 90d, All) returns the correct
+/// data instead of a stale result from a different range. Reads return
+/// `None` once the TTL has elapsed, causing the next caller to recompute.
 struct AggregateCache<T: Clone> {
-    data: Option<(Instant, T)>,
+    data: HashMap<Option<u32>, (Instant, T)>,
     ttl: Duration,
 }
 
 impl<T: Clone> AggregateCache<T> {
     fn new(ttl_secs: u64) -> Self {
         Self {
-            data: None,
+            data: HashMap::new(),
             ttl: Duration::from_secs(ttl_secs),
         }
     }
 
-    fn get(&self) -> Option<T> {
-        self.data.as_ref().and_then(|(time, data)| {
+    fn get(&self, days: Option<u32>) -> Option<T> {
+        self.data.get(&days).and_then(|(time, data)| {
             if time.elapsed() < self.ttl {
                 Some(data.clone())
             } else {
@@ -275,8 +277,8 @@ impl<T: Clone> AggregateCache<T> {
         })
     }
 
-    fn set(&mut self, data: T) {
-        self.data = Some((Instant::now(), data));
+    fn set(&mut self, days: Option<u32>, data: T) {
+        self.data.insert(days, (Instant::now(), data));
     }
 }
 
@@ -734,17 +736,50 @@ fn extract_project_name(path: &str) -> String {
 // ============================================================================
 
 /// Scan and get all sessions with basic metrics
-/// Uses cached session list and summaries for fast response
+/// Uses DB-first approach for fast response, falls back to JSONL parsing
 #[tauri::command]
 pub async fn get_sessions(
-    _state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, AppState>,
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> Result<Vec<SessionSummary>, CommandError> {
     let limit = limit.unwrap_or(100) as usize;
     let offset = offset.unwrap_or(0) as usize;
 
-    // Use cached session list
+    // Try DB-first path for instant response (no JSONL parsing)
+    if let Some(db) = state.db.get() {
+        if let Ok(db_sessions) = db.with_connection(|conn| {
+            db::queries::get_sessions_for_frontend(conn, limit, offset)
+        }) {
+            if !db_sessions.is_empty() {
+                let summaries: Vec<SessionSummary> = db_sessions
+                    .into_iter()
+                    .filter(|s| s.project_path.is_empty() || is_real_user_project(&s.project_path))
+                    .map(|s| SessionSummary {
+                        id: s.session_id,
+                        project_path: s.project_path.clone(),
+                        project_name: if s.project_name.is_empty() {
+                            extract_project_name(&s.project_path)
+                        } else {
+                            s.project_name
+                        },
+                        started_at: s.started_at,
+                        last_activity_at: s.last_activity_at,
+                        model: s.model,
+                        total_cost: s.total_cost,
+                        total_turns: s.total_turns,
+                        total_tokens: s.total_tokens,
+                        duration_ms: s.duration_ms,
+                        is_subagent: s.is_subagent,
+                        file_path: s.file_path,
+                    })
+                    .collect();
+                return Ok(summaries);
+            }
+        }
+    }
+
+    // Fallback: Use cached session list with JSONL parsing
     let sessions = get_cached_session_list();
 
     // Get or compute summaries from cache, filtering out empty sessions
@@ -1252,21 +1287,188 @@ pub async fn preload_all_sessions(
     SESSIONS_PRELOADED.store(true, Ordering::SeqCst);
     let elapsed = start.elapsed();
     tracing::info!(
-        "Preloaded {} sessions (DB cache hits: {}, misses: {}) in {:?}",
+        "Phase 1 complete: Preloaded {} sessions (DB cache hits: {}, misses: {}) in {:?}",
         total_count,
         cache_hits,
         cache_misses,
         elapsed
     );
 
+    // Phase 2: Process remaining sessions in background
+    let remaining_count = file_sessions.len().saturating_sub(preload_limit);
+    if remaining_count > 0 {
+        let remaining_sessions: Vec<SessionFileInfo> = file_sessions.into_iter().skip(preload_limit).collect();
+        // Move the DB cache into the background task for cache-hit checking
+        let db_cache_for_phase2 = db_cached_sessions;
+
+        tokio::spawn(async move {
+            tracing::info!("Phase 2: Processing {} remaining sessions in background...", remaining_sessions.len());
+            let phase2_start = Instant::now();
+            let mut phase2_processed = 0u32;
+            let mut phase2_cached = 0u32;
+            let mut phase2_skipped = 0u32;
+
+            // Create a dedicated DB connection for Phase 2
+            // (Database wraps Mutex<Connection> and doesn't impl Clone)
+            let phase2_db = match db::Database::new(db::default_db_path()) {
+                Ok(db) => {
+                    if let Err(e) = db.initialize() {
+                        tracing::warn!("Phase 2: Failed to initialize DB: {:?}", e);
+                        return;
+                    }
+                    Some(db)
+                }
+                Err(e) => {
+                    tracing::warn!("Phase 2: Failed to open DB connection: {:?}", e);
+                    None
+                }
+            };
+
+            // Process in chunks of 50 to avoid overwhelming the system
+            for chunk in remaining_sessions.chunks(50) {
+                // First, separate DB cache hits from misses to avoid unnecessary JSONL parsing
+                let mut chunk_cache_hits: Vec<(&SessionFileInfo, SessionSummary)> = Vec::new();
+                let mut chunk_misses: Vec<SessionFileInfo> = Vec::new();
+
+                for session in chunk {
+                    let current_mtime = get_file_mtime(&session.path);
+                    if let Some(cached) = db_cache_for_phase2.get(&session.session_id) {
+                        let mtime_matches = match (&cached.file_mtime, &current_mtime) {
+                            (Some(stored), Some(current)) => stored == current,
+                            _ => false,
+                        };
+                        if mtime_matches {
+                            let summary = convert_db_cache_to_summary(cached, session);
+                            chunk_cache_hits.push((session, summary));
+                            continue;
+                        }
+                    }
+                    chunk_misses.push(session.clone());
+                }
+
+                // Store cache hits into the memory cache immediately (no JSONL parsing needed)
+                for (session, summary) in chunk_cache_hits {
+                    phase2_cached += 1;
+                    if let Ok(mut list_cache) = SESSION_LIST_CACHE.write() {
+                        list_cache.summaries.insert(session.session_id.clone(), summary);
+                    }
+                }
+
+                // Parse cache misses in parallel
+                if !chunk_misses.is_empty() {
+                    let mut handles = Vec::new();
+                    let semaphore = Arc::new(tokio::sync::Semaphore::new(8));
+
+                    for session in chunk_misses {
+                        let sem = semaphore.clone();
+
+                        let handle = tokio::spawn(async move {
+                            let _permit = sem.acquire_owned().await;
+                            tokio::task::spawn_blocking(move || {
+                                let current_mtime = get_file_mtime(&session.path);
+                                let summary = compute_session_summary(&session);
+
+                                let session_tokens = if let Ok((turns, _)) = get_session_turns(&session.session_id) {
+                                    let (tokens, _, _, _, _, _, _) = calculate_metrics_from_turns(&turns);
+                                    tokens
+                                } else {
+                                    SessionTokens::new()
+                                };
+
+                                (session, summary, session_tokens, current_mtime)
+                            }).await
+                        });
+                        handles.push(handle);
+                    }
+
+                    // Collect results and store to DB + memory cache
+                    for handle in handles {
+                        if let Ok(Ok((session, summary, session_tokens, current_mtime))) = handle.await {
+                            if let Some(ref mtime) = current_mtime {
+                                // Store to DB using the dedicated Phase 2 connection
+                                if let Some(ref db) = phase2_db {
+                                    let total_cache_write = session_tokens.total_cache_write_5m + session_tokens.total_cache_write_1h;
+                                    let total_cache = session_tokens.total_cache_read + total_cache_write;
+                                    let cache_hit_rate = if total_cache > 0 {
+                                        session_tokens.total_cache_read as f64 / total_cache as f64
+                                    } else {
+                                        0.0
+                                    };
+                                    const MAX_CONTEXT: f64 = 200_000.0;
+                                    let peak_context_pct = (session_tokens.total_input.max(session_tokens.total_cache_read) as f64
+                                        / MAX_CONTEXT * 100.0).min(100.0);
+
+                                    let _ = db.with_connection(|conn| {
+                                        db::queries::upsert_session_with_mtime(
+                                            conn,
+                                            &summary.id,
+                                            &summary.project_path,
+                                            &summary.project_name,
+                                            None,
+                                            &summary.started_at,
+                                            summary.last_activity_at.as_deref().unwrap_or(&summary.started_at),
+                                            summary.model.as_deref().unwrap_or("unknown"),
+                                            false,
+                                            &summary.file_path,
+                                            mtime,
+                                        )?;
+                                        db::queries::upsert_session_metrics(
+                                            conn,
+                                            &summary.id,
+                                            summary.total_turns,
+                                            summary.duration_ms,
+                                            summary.total_cost,
+                                            session_tokens.total_input,
+                                            session_tokens.total_output,
+                                            session_tokens.total_cache_read,
+                                            total_cache_write,
+                                            0.0,
+                                            cache_hit_rate,
+                                            peak_context_pct,
+                                        )?;
+                                        Ok(())
+                                    });
+                                    phase2_processed += 1;
+                                }
+                            } else {
+                                phase2_skipped += 1;
+                            }
+
+                            // Also cache in memory
+                            if let Ok(mut list_cache) = SESSION_LIST_CACHE.write() {
+                                list_cache.summaries.insert(session.session_id.clone(), summary);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Invalidate aggregate caches so next dashboard request picks up Phase 2 data
+            if let Ok(mut cache) = DASHBOARD_CACHE.lock() {
+                cache.data.clear();
+            }
+            if let Ok(mut cache) = DAILY_CACHE.lock() {
+                cache.data.clear();
+            }
+            if let Ok(mut cache) = PROJECT_CACHE.lock() {
+                cache.data.clear();
+            }
+
+            tracing::info!(
+                "Phase 2 complete: processed {} sessions, cached {}, skipped {} in {:?}",
+                phase2_processed, phase2_cached, phase2_skipped, phase2_start.elapsed()
+            );
+        });
+    }
+
     Ok(total_count as u32)
 }
 
 /// Get sessions filtered by date range efficiently
-/// Uses cached summaries and filters in memory
+/// Uses DB-first approach for fast response, falls back to JSONL parsing
 #[tauri::command]
 pub async fn get_sessions_filtered(
-    _state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, AppState>,
     start_date: Option<String>,
     end_date: Option<String>,
     limit: Option<i64>,
@@ -1275,7 +1477,46 @@ pub async fn get_sessions_filtered(
     let limit = limit.unwrap_or(100) as usize;
     let offset = offset.unwrap_or(0) as usize;
 
-    // Use cached session list
+    // Try DB-first path for instant response (no JSONL parsing)
+    if let Some(db) = state.db.get() {
+        if let Ok(db_sessions) = db.with_connection(|conn| {
+            db::queries::get_sessions_for_frontend_filtered(
+                conn,
+                start_date.as_deref(),
+                end_date.as_deref(),
+                limit,
+                offset,
+            )
+        }) {
+            if !db_sessions.is_empty() {
+                let summaries: Vec<SessionSummary> = db_sessions
+                    .into_iter()
+                    .filter(|s| s.project_path.is_empty() || is_real_user_project(&s.project_path))
+                    .map(|s| SessionSummary {
+                        id: s.session_id,
+                        project_path: s.project_path.clone(),
+                        project_name: if s.project_name.is_empty() {
+                            extract_project_name(&s.project_path)
+                        } else {
+                            s.project_name
+                        },
+                        started_at: s.started_at,
+                        last_activity_at: s.last_activity_at,
+                        model: s.model,
+                        total_cost: s.total_cost,
+                        total_turns: s.total_turns,
+                        total_tokens: s.total_tokens,
+                        duration_ms: s.duration_ms,
+                        is_subagent: s.is_subagent,
+                        file_path: s.file_path,
+                    })
+                    .collect();
+                return Ok(summaries);
+            }
+        }
+    }
+
+    // Fallback: Use cached session list with JSONL parsing
     let sessions = get_cached_session_list();
 
     // Get summaries, filter out empty sessions, temp paths, and filter by date
@@ -1320,11 +1561,45 @@ pub async fn get_sessions_filtered(
 /// given project path, applying the same filtering as get_project_metrics
 /// to ensure the session list matches the aggregate metrics shown on
 /// project cards.
+/// Uses DB-first approach for fast response, falls back to JSONL parsing.
 #[tauri::command]
 pub async fn get_sessions_by_project(
-    _state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, AppState>,
     project_path: String,
 ) -> Result<Vec<SessionSummary>, CommandError> {
+    // Try DB-first path for instant response (no JSONL parsing)
+    if let Some(db) = state.db.get() {
+        if let Ok(db_sessions) = db.with_connection(|conn| {
+            db::queries::get_sessions_for_frontend_by_project(conn, &project_path)
+        }) {
+            if !db_sessions.is_empty() {
+                let summaries: Vec<SessionSummary> = db_sessions
+                    .into_iter()
+                    .map(|s| SessionSummary {
+                        id: s.session_id,
+                        project_path: s.project_path.clone(),
+                        project_name: if s.project_name.is_empty() {
+                            extract_project_name(&s.project_path)
+                        } else {
+                            s.project_name
+                        },
+                        started_at: s.started_at,
+                        last_activity_at: s.last_activity_at,
+                        model: s.model,
+                        total_cost: s.total_cost,
+                        total_turns: s.total_turns,
+                        total_tokens: s.total_tokens,
+                        duration_ms: s.duration_ms,
+                        is_subagent: s.is_subagent,
+                        file_path: s.file_path,
+                    })
+                    .collect();
+                return Ok(summaries);
+            }
+        }
+    }
+
+    // Fallback: Use cached session list with JSONL parsing
     let sessions = get_cached_session_list();
 
     let summaries: Vec<SessionSummary> = sessions
@@ -2187,6 +2462,8 @@ fn get_aggregate_recommendations(limit: Option<u32>) -> Result<RecommendationSum
 #[derive(Debug, Clone, Serialize)]
 pub struct DashboardSummaryResponse {
     pub total_sessions: u32,
+    pub user_sessions: u32,
+    pub subagent_sessions: u32,
     pub total_cost: f64,
     pub total_turns: u32,
     pub total_tokens: u64,
@@ -2201,6 +2478,8 @@ pub struct DashboardSummaryResponse {
 pub struct DailyMetricsResponse {
     pub date: String,
     pub session_count: u32,
+    pub user_session_count: u32,
+    pub subagent_session_count: u32,
     pub total_turns: u32,
     pub total_cost: f64,
     pub total_tokens: u64,
@@ -2227,60 +2506,60 @@ pub struct ProjectMetricsResponse {
 #[tauri::command]
 pub async fn get_dashboard_summary(
     state: tauri::State<'_, AppState>,
-    limit: Option<u32>,
+    days: Option<u32>,
 ) -> Result<DashboardSummaryResponse, CommandError> {
-    // Return cached result if still valid (TTL 30s)
+    // Return cached result if still valid (TTL 30s) and for the same time range
     if let Ok(cache) = DASHBOARD_CACHE.lock() {
-        if let Some(cached) = cache.get() {
+        if let Some(cached) = cache.get(days) {
             return Ok(cached);
         }
     }
 
-    // Try DB aggregate query (milliseconds, no JSONL parsing)
+    // Try DB aggregate query - the DB may have data from previous runs even before
+    // preload completes. The total_sessions > 0 check handles the empty DB case.
     if let Some(db) = state.db.get() {
         if let Ok(agg) = db.with_connection(|conn| {
-            db::queries::get_dashboard_summary_from_db(conn)
+            db::queries::get_dashboard_summary_from_db(conn, days)
         }) {
-            let result = DashboardSummaryResponse {
-                total_sessions: agg.total_sessions,
-                total_cost: agg.total_cost,
-                total_turns: agg.total_turns,
-                total_tokens: agg.total_tokens,
-                avg_cost_per_session: if agg.total_sessions > 0 { agg.total_cost / agg.total_sessions as f64 } else { 0.0 },
-                avg_turns_per_session: if agg.total_sessions > 0 { agg.total_turns as f64 / agg.total_sessions as f64 } else { 0.0 },
-                avg_efficiency_score: agg.avg_efficiency,
-                active_projects: agg.active_projects,
-            };
-            // Store in cache
-            if let Ok(mut cache) = DASHBOARD_CACHE.lock() {
-                cache.set(result.clone());
+            if agg.total_sessions > 0 {
+                let result = DashboardSummaryResponse {
+                    total_sessions: agg.total_sessions,
+                    user_sessions: agg.user_sessions,
+                    subagent_sessions: agg.subagent_sessions,
+                    total_cost: agg.total_cost,
+                    total_turns: agg.total_turns,
+                    total_tokens: agg.total_tokens,
+                    avg_cost_per_session: if agg.total_sessions > 0 { agg.total_cost / agg.total_sessions as f64 } else { 0.0 },
+                    avg_turns_per_session: if agg.total_sessions > 0 { agg.total_turns as f64 / agg.total_sessions as f64 } else { 0.0 },
+                    avg_efficiency_score: agg.avg_efficiency,
+                    active_projects: agg.active_projects,
+                };
+                // Store in cache keyed by days
+                if let Ok(mut cache) = DASHBOARD_CACHE.lock() {
+                    cache.set(days, result.clone());
+                }
+                return Ok(result);
             }
-            return Ok(result);
         }
     }
 
-    let _limit = limit; // Ignored - process ALL sessions for accurate totals
+    // Compute cutoff date if days is specified
+    let cutoff = days.map(|d| chrono::Utc::now() - chrono::Duration::days(d as i64));
 
     // Use cached session list
     let sessions = get_cached_session_list();
-    let _total_session_count = sessions.len();
 
-    // Count unique projects from all sessions (quick operation)
-    // Filter out temporary/artifact paths — only real user projects count
-    let unique_projects: HashSet<String> = sessions
-        .iter()
-        .filter_map(|s| s.project_path.clone())
-        .filter(|p| is_real_user_project(p))
-        .collect();
-
+    let mut unique_projects: HashSet<String> = HashSet::new();
     let mut total_cost = 0.0;
     let mut total_turns = 0u32;
     let mut total_tokens = 0u64;
-    let mut efficiency_sum = 0.0;
-    let mut efficiency_count = 0u32;
+    let mut global_cache_read = 0u64;
+    let mut global_cache_write = 0u64;
     let mut processed_count = 0u32;
+    let mut user_session_count = 0u32;
+    let mut subagent_session_count = 0u32;
 
-    // Process ALL sessions for accurate aggregate totals
+    // Process sessions, filtering by date range when specified
     for file_info in sessions {
         // Skip sessions from temporary/artifact paths
         let project_path = file_info.project_path.clone().unwrap_or_default();
@@ -2289,6 +2568,21 @@ pub async fn get_dashboard_summary(
         }
 
         if let Ok((turns, _)) = get_session_turns(&file_info.session_id) {
+            if turns.is_empty() {
+                continue;
+            }
+
+            // Filter by date if days is specified
+            if let Some(cutoff_date) = cutoff {
+                let started_at = &turns[0].started_at;
+                if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(started_at) {
+                    let utc_date = parsed.with_timezone(&chrono::Utc);
+                    if utc_date < cutoff_date {
+                        continue;
+                    }
+                }
+            }
+
             let (
                 session_tokens,
                 total_breakdown,
@@ -2304,25 +2598,36 @@ pub async fn get_dashboard_summary(
             total_tokens += session_tokens.total();
             processed_count += 1;
 
-            // Calculate CER for efficiency using correct formula:
-            // CER = cache_read / (cache_read + cache_write)
-            let total_cache = session_tokens.total_cache();
-            if total_cache > 0 {
-                let cer = session_tokens.total_cache_read as f64 / total_cache as f64;
-                efficiency_sum += cer;
-                efficiency_count += 1;
+            // Track user vs subagent sessions
+            if file_info.is_subagent {
+                subagent_session_count += 1;
+            } else {
+                user_session_count += 1;
             }
+
+            // Track unique projects only for sessions that pass the date filter
+            if !project_path.is_empty() && is_real_user_project(&project_path) {
+                unique_projects.insert(project_path);
+            }
+
+            // Accumulate global cache totals for CER calculation
+            global_cache_read += session_tokens.total_cache_read;
+            global_cache_write += session_tokens.total_cache_write();
         }
     }
 
-    let avg_efficiency = if efficiency_count > 0 {
-        Some(efficiency_sum / efficiency_count as f64)
+    // Global CER = SUM(cache_read) / (SUM(cache_read) + SUM(cache_write))
+    let total_cache = global_cache_read + global_cache_write;
+    let avg_efficiency = if total_cache > 0 {
+        Some(global_cache_read as f64 / total_cache as f64)
     } else {
         None
     };
 
     let result = DashboardSummaryResponse {
         total_sessions: processed_count as u32,
+        user_sessions: user_session_count,
+        subagent_sessions: subagent_session_count,
         total_cost,
         total_turns,
         total_tokens,
@@ -2332,9 +2637,9 @@ pub async fn get_dashboard_summary(
         active_projects: unique_projects.len() as u32,
     };
 
-    // Store in cache for subsequent requests
+    // Store in cache keyed by days for subsequent requests
     if let Ok(mut cache) = DASHBOARD_CACHE.lock() {
-        cache.set(result.clone());
+        cache.set(days, result.clone());
     }
 
     Ok(result)
@@ -2349,14 +2654,13 @@ pub async fn get_daily_metrics(
     days: Option<u32>,
 ) -> Result<Vec<DailyMetricsResponse>, CommandError> {
     if let Ok(cache) = DAILY_CACHE.lock() {
-        if let Some(cached) = cache.get() {
+        if let Some(cached) = cache.get(days) {
             return Ok(cached);
         }
     }
 
-    let days = days.unwrap_or(30);
-
-    // Try DB aggregate query (milliseconds, no JSONL parsing)
+    // Try DB aggregate query - the DB may have data from previous runs even before
+    // preload completes. The !daily.is_empty() check handles the empty DB case.
     if let Some(db) = state.db.get() {
         if let Ok(daily) = db.with_connection(|conn| {
             db::queries::get_daily_metrics_from_db(conn, days)
@@ -2366,28 +2670,30 @@ pub async fn get_daily_metrics(
                     DailyMetricsResponse {
                         date: d.date,
                         session_count: d.session_count,
+                        user_session_count: d.user_session_count,
+                        subagent_session_count: d.subagent_session_count,
                         total_turns: d.total_turns,
                         total_cost: d.total_cost,
                         total_tokens: d.total_tokens,
-                        avg_efficiency_score: None,
+                        avg_efficiency_score: d.avg_efficiency,
                     }
                 }).collect();
                 result.sort_by(|a, b| b.date.cmp(&a.date));
                 if let Ok(mut cache) = DAILY_CACHE.lock() {
-                    cache.set(result.clone());
+                    cache.set(days, result.clone());
                 }
                 return Ok(result);
             }
         }
     }
 
-    let cutoff = chrono::Utc::now() - chrono::Duration::days(days as i64);
+    let cutoff = days.map(|d| chrono::Utc::now() - chrono::Duration::days(d as i64));
 
     // Use cached session list
     let sessions = get_cached_session_list();
 
-    let mut by_date: HashMap<String, (u32, u32, f64, u64, f64, u32)> = HashMap::new();
-    // (session_count, total_turns, total_cost, total_tokens, efficiency_sum, efficiency_count)
+    // (session_count, user_session_count, subagent_session_count, total_turns, total_cost, total_tokens, efficiency_sum, efficiency_count)
+    let mut by_date: HashMap<String, (u32, u32, u32, u32, f64, u64, f64, u32)> = HashMap::new();
 
     for file_info in sessions.iter() { // Process ALL sessions within date range
         // Skip sessions from temporary/artifact paths
@@ -2403,11 +2709,13 @@ pub async fn get_daily_metrics(
 
             let started_at = &turns[0].started_at;
 
-            // Parse date and check if within range
+            // Parse date and check if within range (skip cutoff check when days is None = all time)
             if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(started_at) {
                 let utc_date = parsed.with_timezone(&chrono::Utc);
-                if utc_date < cutoff {
-                    continue;
+                if let Some(cutoff_date) = cutoff {
+                    if utc_date < cutoff_date {
+                        continue;
+                    }
                 }
 
                 let date_key = utc_date.format("%Y-%m-%d").to_string();
@@ -2432,23 +2740,30 @@ pub async fn get_daily_metrics(
                     0.0
                 };
 
-                let entry = by_date.entry(date_key).or_insert((0, 0, 0.0, 0, 0.0, 0));
+                let entry = by_date.entry(date_key).or_insert((0, 0, 0, 0, 0.0, 0, 0.0, 0));
                 entry.0 += 1; // session_count
-                entry.1 += turns.len() as u32; // total_turns
-                entry.2 += total_breakdown.total_cost; // total_cost
-                entry.3 += total; // total_tokens
-                entry.4 += efficiency; // efficiency_sum
-                entry.5 += 1; // efficiency_count
+                if file_info.is_subagent {
+                    entry.2 += 1; // subagent_session_count
+                } else {
+                    entry.1 += 1; // user_session_count
+                }
+                entry.3 += turns.len() as u32; // total_turns
+                entry.4 += total_breakdown.total_cost; // total_cost
+                entry.5 += total; // total_tokens
+                entry.6 += efficiency; // efficiency_sum
+                entry.7 += 1; // efficiency_count
             }
         }
     }
 
     let mut result: Vec<DailyMetricsResponse> = by_date
         .into_iter()
-        .map(|(date, (session_count, total_turns, total_cost, total_tokens, eff_sum, eff_count))| {
+        .map(|(date, (session_count, user_session_count, subagent_session_count, total_turns, total_cost, total_tokens, eff_sum, eff_count))| {
             DailyMetricsResponse {
                 date,
                 session_count,
+                user_session_count,
+                subagent_session_count,
                 total_turns,
                 total_cost,
                 total_tokens,
@@ -2461,7 +2776,7 @@ pub async fn get_daily_metrics(
     result.sort_by(|a, b| b.date.cmp(&a.date));
 
     if let Ok(mut cache) = DAILY_CACHE.lock() {
-        cache.set(result.clone());
+        cache.set(days, result.clone());
     }
 
     Ok(result)
@@ -2470,21 +2785,23 @@ pub async fn get_daily_metrics(
 /// Get project metrics efficiently
 ///
 /// Returns metrics grouped by project path using cached session data.
+/// Accepts an optional `days` parameter to filter to recent sessions.
 #[tauri::command]
 pub async fn get_project_metrics(
     state: tauri::State<'_, AppState>,
-    limit: Option<u32>,
+    days: Option<u32>,
 ) -> Result<Vec<ProjectMetricsResponse>, CommandError> {
     if let Ok(cache) = PROJECT_CACHE.lock() {
-        if let Some(cached) = cache.get() {
+        if let Some(cached) = cache.get(days) {
             return Ok(cached);
         }
     }
 
-    // Try DB aggregate query (milliseconds, no JSONL parsing)
+    // Try DB aggregate query - the DB may have data from previous runs even before
+    // preload completes. The !projects.is_empty() check handles the empty DB case.
     if let Some(db) = state.db.get() {
         if let Ok(projects) = db.with_connection(|conn| {
-            db::queries::get_project_metrics_from_db(conn)
+            db::queries::get_project_metrics_from_db(conn, days)
         }) {
             if !projects.is_empty() {
                 let mut result: Vec<ProjectMetricsResponse> = projects.into_iter().map(|p| {
@@ -2501,14 +2818,15 @@ pub async fn get_project_metrics(
                 }).collect();
                 result.sort_by(|a, b| b.total_cost.partial_cmp(&a.total_cost).unwrap_or(std::cmp::Ordering::Equal));
                 if let Ok(mut cache) = PROJECT_CACHE.lock() {
-                    cache.set(result.clone());
+                    cache.set(days, result.clone());
                 }
                 return Ok(result);
             }
         }
     }
 
-    let _limit = limit; // Ignored - return ALL projects for accurate totals
+    // Compute cutoff date if days is specified
+    let cutoff = days.map(|d| chrono::Utc::now() - chrono::Duration::days(d as i64));
 
     // Use cached session list
     let sessions = get_cached_session_list();
@@ -2528,6 +2846,17 @@ pub async fn get_project_metrics(
             }
 
             let started_at = turns[0].started_at.clone();
+
+            // Filter by date if days is specified
+            if let Some(cutoff_date) = cutoff {
+                if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(&started_at) {
+                    let utc_date = parsed.with_timezone(&chrono::Utc);
+                    if utc_date < cutoff_date {
+                        continue;
+                    }
+                }
+            }
+
             let project_name = extract_project_name(&project_path);
 
             let (
@@ -2576,7 +2905,7 @@ pub async fn get_project_metrics(
     result.sort_by(|a, b| b.total_cost.partial_cmp(&a.total_cost).unwrap_or(std::cmp::Ordering::Equal));
 
     if let Ok(mut cache) = PROJECT_CACHE.lock() {
-        cache.set(result.clone());
+        cache.set(days, result.clone());
     }
 
     Ok(result)

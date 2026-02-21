@@ -2,7 +2,6 @@ import { useState, useMemo } from 'react';
 import {
   LineChart,
   Line,
-  BarChart,
   Bar,
   XAxis,
   YAxis,
@@ -11,6 +10,8 @@ import {
   ResponsiveContainer,
   Area,
   AreaChart,
+  ComposedChart,
+  Legend,
 } from 'recharts';
 import { Header } from '../components/layout/Header';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../components/ui/Card';
@@ -35,6 +36,8 @@ interface TrendSummary {
   totalCost: number;
   avgEfficiency: number;
   totalSessions: number;
+  totalUserSessions: number;
+  totalSubagentSessions: number;
   costTrend: number; // percentage change
   efficiencyTrend: number; // percentage change
   sessionsTrend: number; // percentage change
@@ -45,35 +48,7 @@ function Trends() {
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
 
-  // Calculate date range based on selection
-  const dateRange = useMemo(() => {
-    const now = new Date();
-    const endDate = now.toISOString().split('T')[0];
-    let startDate: string;
-
-    switch (timeRange) {
-      case '7d':
-        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        break;
-      case '30d':
-        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        break;
-      case '90d':
-        startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        break;
-      case 'custom':
-        return {
-          startDate: customStartDate || endDate,
-          endDate: customEndDate || endDate,
-        };
-      default:
-        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    }
-
-    return { startDate, endDate };
-  }, [timeRange, customStartDate, customEndDate]);
-
-  // Calculate days for the simple trend APIs
+  // Convert time range selection to number of days for the fast SQL-backed endpoint
   const days = useMemo(() => {
     switch (timeRange) {
       case '7d': return 7;
@@ -83,7 +58,7 @@ function Trends() {
         if (customStartDate && customEndDate) {
           const start = new Date(customStartDate);
           const end = new Date(customEndDate);
-          return Math.ceil((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
+          return Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)));
         }
         return 30;
       }
@@ -91,14 +66,8 @@ function Trends() {
     }
   }, [timeRange, customStartDate, customEndDate]);
 
-  // Fetch trend data
-  const { data: trends, isLoading: trendsLoading } = useTrends(
-    dateRange.startDate,
-    dateRange.endDate,
-    'daily'
-  );
-  // Using days in the query key ensures cache invalidation when time range changes
-  void days;
+  // Fetch trend data from the fast SQL-backed getDailyMetrics endpoint
+  const { data: trends, isLoading: trendsLoading } = useTrends(days);
 
   // Calculate summary statistics
   const summary = useMemo<TrendSummary | null>(() => {
@@ -106,6 +75,8 @@ function Trends() {
 
     const totalCost = trends.reduce((sum, t) => sum + t.total_cost, 0);
     const totalSessions = trends.reduce((sum, t) => sum + t.sessions, 0);
+    const totalUserSessions = trends.reduce((sum, t) => sum + t.user_sessions, 0);
+    const totalSubagentSessions = trends.reduce((sum, t) => sum + t.subagent_sessions, 0);
     const avgEfficiency = trends.reduce((sum, t) => sum + t.avg_efficiency, 0) / trends.length;
 
     // Calculate trend by comparing first half to second half
@@ -129,6 +100,8 @@ function Trends() {
       totalCost,
       avgEfficiency,
       totalSessions,
+      totalUserSessions,
+      totalSubagentSessions,
       costTrend: costTrendPct,
       efficiencyTrend: efficiencyTrendPct,
       sessionsTrend: sessionsTrendPct,
@@ -146,6 +119,8 @@ function Trends() {
         cost: t.total_cost,
         efficiency: t.avg_efficiency,
         sessions: t.sessions,
+        user_sessions: t.user_sessions,
+        subagent_sessions: t.subagent_sessions,
         turns: t.turns,
         tokens: t.total_tokens,
       }));
@@ -220,7 +195,7 @@ function Trends() {
           />
           <SummaryCard
             title="Total Sessions"
-            value={summary ? formatNumber(summary.totalSessions) : '0'}
+            value={summary ? `${formatNumber(summary.totalUserSessions)} user / ${formatNumber(summary.totalSubagentSessions)} subagent` : '0'}
             trend={summary?.sessionsTrend}
             icon={Activity}
             isLoading={isLoading}
@@ -344,7 +319,7 @@ function Trends() {
           <Card className="h-96">
             <CardHeader>
               <CardTitle>Sessions Per Day</CardTitle>
-              <CardDescription>Daily session count</CardDescription>
+              <CardDescription>User sessions (bars) vs subagent sessions (line)</CardDescription>
             </CardHeader>
             <CardContent className="h-72">
               {isLoading ? (
@@ -357,10 +332,24 @@ function Trends() {
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData}>
+                  <ComposedChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2e" />
                     <XAxis dataKey="date" stroke="#6b7280" fontSize={12} tickLine={false} />
-                    <YAxis stroke="#6b7280" fontSize={12} tickLine={false} />
+                    <YAxis
+                      yAxisId="left"
+                      stroke="#6b7280"
+                      fontSize={12}
+                      tickLine={false}
+                      label={{ value: 'User Sessions', angle: -90, position: 'insideLeft', style: { fill: '#6b7280', fontSize: 11 } }}
+                    />
+                    <YAxis
+                      yAxisId="right"
+                      orientation="right"
+                      stroke="#6b7280"
+                      fontSize={12}
+                      tickLine={false}
+                      label={{ value: 'Subagents', angle: 90, position: 'insideRight', style: { fill: '#6b7280', fontSize: 11 } }}
+                    />
                     <Tooltip
                       contentStyle={{
                         backgroundColor: '#1a1a1c',
@@ -368,14 +357,25 @@ function Trends() {
                         borderRadius: '8px',
                       }}
                       labelStyle={{ color: '#fff' }}
-                      formatter={(value: number | undefined) => value !== undefined ? [formatNumber(value), 'Sessions'] : ['', 'Sessions']}
                     />
+                    <Legend />
                     <Bar
-                      dataKey="sessions"
+                      yAxisId="left"
+                      dataKey="user_sessions"
+                      name="User Sessions"
                       fill="#8b5cf6"
                       radius={[4, 4, 0, 0]}
                     />
-                  </BarChart>
+                    <Line
+                      yAxisId="right"
+                      type="monotone"
+                      dataKey="subagent_sessions"
+                      name="Subagents"
+                      stroke="#f97316"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                  </ComposedChart>
                 </ResponsiveContainer>
               )}
             </CardContent>

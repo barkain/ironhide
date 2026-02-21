@@ -1,9 +1,11 @@
 import { useState, useMemo } from 'react';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { Header } from '../components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/Card';
 import { GanttChart } from '../components/charts/GanttChart';
 import type { GanttSession } from '../components/charts/GanttChart';
-import { useSessions } from '../hooks/useSessions';
+import { getSessionsFiltered, getSessions, getDashboardSummary } from '../lib/tauri';
+import type { SessionSummary, DashboardSummary } from '../types';
 import { formatCurrency, formatNumber, getProjectDisplayName } from '../lib/utils';
 import {
   Calendar,
@@ -11,6 +13,7 @@ import {
   BarChart3,
   Clock,
   DollarSign,
+  FolderOpen,
   X,
 } from 'lucide-react';
 
@@ -21,6 +24,28 @@ import {
 type TimeRange = '7d' | '30d' | '90d' | 'all';
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+/** Compute ISO date strings for the start of a time range */
+function timeRangeToStartDate(range: TimeRange): string | undefined {
+  if (range === 'all') return undefined;
+  const days = range === '7d' ? 7 : range === '30d' ? 30 : 90;
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  return cutoff.toISOString();
+}
+
+/** Convert TimeRange to days parameter for backend queries */
+function timeRangeToDays(range: TimeRange): number | undefined {
+  switch (range) {
+    case '7d': return 7;
+    case '30d': return 30;
+    case '90d': return 90;
+    case 'all': return undefined;
+  }
+}
+
+// ============================================================================
 // Component
 // ============================================================================
 
@@ -29,38 +54,39 @@ function Timeline() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [hideSubagents, setHideSubagents] = useState(true);
 
-  // Fetch sessions - use a large limit to get all sessions for the timeline
-  const { data: sessions, isLoading } = useSessions(1000, 0);
+  // Compute date range from the local time range selector
+  const startDate = useMemo(() => timeRangeToStartDate(timeRange), [timeRange]);
+  const summaryDays = useMemo(() => timeRangeToDays(timeRange), [timeRange]);
 
-  // Compute date-filtered sessions
+  // Fetch ALL sessions for the selected time range via the backend.
+  // Used for the Gantt chart visualization (with client-side project/subagent filtering).
+  const { data: sessions, isLoading } = useQuery<SessionSummary[]>({
+    queryKey: ['timeline-sessions', startDate],
+    queryFn: () => {
+      if (startDate) {
+        return getSessionsFiltered(startDate, undefined, 100000, 0);
+      }
+      return getSessions(100000, 0);
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+
+  // Fetch dashboard summary for the summary cards.
+  // Uses the same backend aggregate as the Dashboard page so numbers always match.
+  const { data: summary, isLoading: summaryLoading } = useQuery<DashboardSummary>({
+    queryKey: ['dashboardSummary', summaryDays],
+    queryFn: () => getDashboardSummary(summaryDays),
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    placeholderData: keepPreviousData,
+  });
+
+  // Apply client-side filters (project and subagent) on top of backend date filtering
   const filteredSessions = useMemo(() => {
     if (!sessions) return [];
 
-    const now = new Date();
-    let cutoff: Date | null = null;
-
-    switch (timeRange) {
-      case '7d':
-        cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        break;
-      case '30d':
-        cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        break;
-      case '90d':
-        cutoff = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-        break;
-      case 'all':
-        cutoff = null;
-        break;
-    }
-
     return sessions.filter((session) => {
-      // Date filter
-      if (cutoff) {
-        const sessionDate = new Date(session.started_at);
-        if (sessionDate < cutoff) return false;
-      }
-
       // Project filter - match by project_path for accurate grouping
       if (selectedProject && session.project_path !== selectedProject) {
         return false;
@@ -73,7 +99,7 @@ function Timeline() {
 
       return true;
     });
-  }, [sessions, timeRange, selectedProject, hideSubagents]);
+  }, [sessions, selectedProject, hideSubagents]);
 
   // Map SessionSummary to GanttSession
   const ganttSessions = useMemo<GanttSession[]>(() => {
@@ -111,22 +137,8 @@ function Timeline() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [sessions]);
 
-  // Summary stats for the filtered data
-  const stats = useMemo(() => {
-    const totalSessions = ganttSessions.length;
-    const totalCost = ganttSessions.reduce((sum, s) => sum + s.total_cost, 0);
-    const totalTurns = ganttSessions.reduce((sum, s) => sum + s.total_turns, 0);
-    const totalDurationMs = ganttSessions.reduce((sum, s) => sum + s.duration_ms, 0);
-    const uniqueProjects = new Set(ganttSessions.map((s) => s.project_path || s.project_name)).size;
-
-    return {
-      totalSessions,
-      totalCost,
-      totalTurns,
-      totalDurationMs,
-      uniqueProjects,
-    };
-  }, [ganttSessions]);
+  // Summary loading state: loading if either sessions or summary is loading
+  const statsLoading = isLoading || summaryLoading;
 
   return (
     <div className="flex flex-col">
@@ -209,17 +221,17 @@ function Timeline() {
           </CardContent>
         </Card>
 
-        {/* Summary Stats */}
+        {/* Summary Stats (uses same backend aggregate as Dashboard for consistency) */}
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <Card>
             <CardContent className="flex items-start justify-between">
               <div>
                 <p className="text-sm font-medium text-gray-400">Sessions</p>
                 <p className="mt-1 text-2xl font-bold text-white">
-                  {isLoading ? (
+                  {statsLoading ? (
                     <span className="inline-block h-8 w-16 animate-pulse rounded bg-gray-700" />
                   ) : (
-                    formatNumber(stats.totalSessions)
+                    formatNumber(summary?.total_sessions ?? 0)
                   )}
                 </p>
               </div>
@@ -234,15 +246,15 @@ function Timeline() {
               <div>
                 <p className="text-sm font-medium text-gray-400">Projects</p>
                 <p className="mt-1 text-2xl font-bold text-white">
-                  {isLoading ? (
+                  {statsLoading ? (
                     <span className="inline-block h-8 w-16 animate-pulse rounded bg-gray-700" />
                   ) : (
-                    formatNumber(stats.uniqueProjects)
+                    formatNumber(summary?.active_projects ?? 0)
                   )}
                 </p>
               </div>
               <div className="rounded-lg bg-purple-600/20 p-3">
-                <Calendar className="h-6 w-6 text-purple-400" />
+                <FolderOpen className="h-6 w-6 text-purple-400" />
               </div>
             </CardContent>
           </Card>
@@ -252,10 +264,10 @@ function Timeline() {
               <div>
                 <p className="text-sm font-medium text-gray-400">Total Cost</p>
                 <p className="mt-1 text-2xl font-bold text-white">
-                  {isLoading ? (
+                  {statsLoading ? (
                     <span className="inline-block h-8 w-16 animate-pulse rounded bg-gray-700" />
                   ) : (
-                    formatCurrency(stats.totalCost)
+                    formatCurrency(summary?.total_cost ?? 0)
                   )}
                 </p>
               </div>
@@ -270,10 +282,10 @@ function Timeline() {
               <div>
                 <p className="text-sm font-medium text-gray-400">Total Turns</p>
                 <p className="mt-1 text-2xl font-bold text-white">
-                  {isLoading ? (
+                  {statsLoading ? (
                     <span className="inline-block h-8 w-16 animate-pulse rounded bg-gray-700" />
                   ) : (
-                    formatNumber(stats.totalTurns)
+                    formatNumber(summary?.total_turns ?? 0)
                   )}
                 </p>
               </div>

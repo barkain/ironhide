@@ -5,12 +5,27 @@ import {
   getProjectMetrics,
   refreshData,
 } from '../lib/tauri';
-import { useAppStore } from '../lib/store';
+import { useAppStore, type PresetRange } from '../lib/store';
 import type {
   DashboardSummary,
   DailyMetrics,
   ProjectMetrics,
 } from '../types';
+
+/** Convert a preset range label to the number of days for backend filtering */
+function presetToDays(preset: PresetRange): number | undefined {
+  switch (preset) {
+    case '7d':
+      return 7;
+    case '30d':
+      return 30;
+    case '90d':
+      return 90;
+    case 'all':
+    default:
+      return undefined;
+  }
+}
 
 // ============================================================================
 // Cache Constants (matching useSessions.ts)
@@ -25,11 +40,12 @@ const METRICS_GC_TIME = 30 * 60 * 1000; // 30 minutes
 
 /** Fetch dashboard summary metrics */
 export function useDashboardSummary() {
-  const dateRange = useAppStore((state) => state.dateRange);
+  const presetRange = useAppStore((state) => state.presetRange);
+  const days = presetToDays(presetRange);
 
   return useQuery<DashboardSummary>({
-    queryKey: ['dashboardSummary', dateRange],
-    queryFn: () => getDashboardSummary(),
+    queryKey: ['dashboardSummary', days],
+    queryFn: () => getDashboardSummary(days),
     staleTime: METRICS_STALE_TIME,
     gcTime: METRICS_GC_TIME,
     placeholderData: keepPreviousData,
@@ -42,11 +58,12 @@ export function useDashboardSummary() {
 
 /** Fetch daily aggregated metrics for charts */
 export function useDailyMetrics() {
-  const dateRange = useAppStore((state) => state.dateRange);
+  const presetRange = useAppStore((state) => state.presetRange);
+  const days = presetToDays(presetRange);
 
   return useQuery<DailyMetrics[]>({
-    queryKey: ['dailyMetrics', dateRange],
-    queryFn: () => getDailyMetrics(dateRange || undefined),
+    queryKey: ['dailyMetrics', days],
+    queryFn: () => getDailyMetrics(days),
     staleTime: METRICS_STALE_TIME,
     gcTime: METRICS_GC_TIME,
     placeholderData: keepPreviousData,
@@ -59,9 +76,12 @@ export function useDailyMetrics() {
 
 /** Fetch project-level metrics */
 export function useProjectMetrics() {
+  const presetRange = useAppStore((state) => state.presetRange);
+  const days = presetToDays(presetRange);
+
   return useQuery<ProjectMetrics[]>({
-    queryKey: ['projectMetrics'],
-    queryFn: getProjectMetrics,
+    queryKey: ['projectMetrics', days],
+    queryFn: () => getProjectMetrics(days),
     staleTime: METRICS_STALE_TIME,
     gcTime: METRICS_GC_TIME,
     placeholderData: keepPreviousData,

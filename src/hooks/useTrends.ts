@@ -1,55 +1,51 @@
 import { useQuery } from '@tanstack/react-query';
-import {
-  getTrends,
-  getCostTrend,
-  getEfficiencyTrend,
-  type DailyTrend,
-  type CostTrendPoint,
-  type EfficiencyTrendPoint,
-} from '../lib/tauri';
+import { getDailyMetrics } from '../lib/tauri';
+import type { DailyMetrics } from '../types';
 
 // ============================================================================
-// Trends Hooks
+// Trends Hooks — powered by fast SQL-backed getDailyMetrics endpoint
 // ============================================================================
 
-/**
- * Hook to fetch daily trends within a date range
- * @param startDate - Start date in ISO-8601 format (YYYY-MM-DD)
- * @param endDate - End date in ISO-8601 format (YYYY-MM-DD)
- * @param granularity - Granularity of trends ('daily' | 'weekly' | 'monthly')
- */
-export function useTrends(
-  startDate?: string,
-  endDate?: string,
-  granularity: string = 'daily'
-) {
-  return useQuery<DailyTrend[]>({
-    queryKey: ['trends', startDate, endDate, granularity],
-    queryFn: () => getTrends(startDate, endDate, granularity),
-    staleTime: 1000 * 60 * 5, // 5 minutes
-  });
+/** Shape consumed by the Trends page (superset kept for backwards-compat) */
+export interface TrendPoint {
+  date: string;
+  sessions: number;
+  user_sessions: number;
+  subagent_sessions: number;
+  turns: number;
+  total_tokens: number;
+  total_cost: number;
+  avg_efficiency: number;
+}
+
+/** Map a DailyMetrics row to the TrendPoint shape the Trends page expects.
+ *  Backend returns CER as 0-1 ratio; convert to percentage (0-100) for display. */
+function toTrendPoint(m: DailyMetrics): TrendPoint {
+  return {
+    date: m.date,
+    sessions: m.session_count,
+    user_sessions: m.user_session_count,
+    subagent_sessions: m.subagent_session_count,
+    turns: m.total_turns,
+    total_tokens: m.total_tokens,
+    total_cost: m.total_cost,
+    avg_efficiency: (m.avg_efficiency_score ?? 0) * 100,
+  };
 }
 
 /**
- * Hook to fetch cost trend over specified number of days
- * @param days - Number of days to fetch (default: 30)
+ * Hook to fetch daily trends for the given number of days.
+ * Backed by the fast SQL `get_daily_metrics` command.
+ *
+ * @param days — Number of trailing days to fetch (undefined = backend default, typically 30)
  */
-export function useCostTrend(days: number = 30) {
-  return useQuery<CostTrendPoint[]>({
-    queryKey: ['costTrend', days],
-    queryFn: () => getCostTrend(days),
-    staleTime: 1000 * 60 * 5, // 5 minutes
-  });
-}
-
-/**
- * Hook to fetch efficiency trend over specified number of days
- * @param days - Number of days to fetch (default: 30)
- */
-export function useEfficiencyTrend(days: number = 30) {
-  return useQuery<EfficiencyTrendPoint[]>({
-    queryKey: ['efficiencyTrend', days],
-    queryFn: () => getEfficiencyTrend(days),
+export function useTrends(days?: number) {
+  return useQuery<TrendPoint[]>({
+    queryKey: ['trends', days],
+    queryFn: async () => {
+      const metrics = await getDailyMetrics(days);
+      return metrics.map(toTrendPoint);
+    },
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }

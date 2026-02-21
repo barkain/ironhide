@@ -7,7 +7,6 @@ import type {
   DashboardSummary,
   DailyMetrics,
   ProjectMetrics,
-  DateRange,
 } from '../types';
 
 // ============================================================================
@@ -74,21 +73,21 @@ export async function getSessionsFiltered(
 // ============================================================================
 
 /** Get dashboard summary metrics (using efficient backend command) */
-export async function getDashboardSummary(): Promise<DashboardSummary> {
-  // Use the efficient backend command - processes ALL sessions for accurate totals
-  return invoke('get_dashboard_summary', {});
+export async function getDashboardSummary(days?: number): Promise<DashboardSummary> {
+  // Pass days to backend for time-range filtering (undefined = all time)
+  return invoke('get_dashboard_summary', { days: days ?? null });
 }
 
 /** Get daily metrics for charts (using efficient backend command) */
-export async function getDailyMetrics(_dateRange?: DateRange): Promise<DailyMetrics[]> {
-  // Use the efficient backend command
-  return invoke('get_daily_metrics', { days: 30 });
+export async function getDailyMetrics(days?: number): Promise<DailyMetrics[]> {
+  // Pass days to backend for time-range filtering (undefined = 30 days default)
+  return invoke('get_daily_metrics', { days: days ?? null });
 }
 
 /** Get project-level metrics (using efficient backend command) */
-export async function getProjectMetrics(): Promise<ProjectMetrics[]> {
-  // Use the efficient backend command - no limit, return all projects
-  return invoke('get_project_metrics', {});
+export async function getProjectMetrics(days?: number): Promise<ProjectMetrics[]> {
+  // Pass days to backend for time-range filtering (undefined = all time)
+  return invoke('get_project_metrics', { days: days ?? null });
 }
 
 // ============================================================================
