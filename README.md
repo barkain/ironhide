@@ -53,12 +53,12 @@ Download the latest release for your platform:
 
 | Platform | Download |
 |----------|----------|
-| macOS (Apple Silicon) | [Ironhide_*.dmg (arm64)](https://github.com/YOUR_USERNAME/ironhide/releases/latest) |
-| macOS (Intel) | [Ironhide_*.dmg (x64)](https://github.com/YOUR_USERNAME/ironhide/releases/latest) |
-| Windows | [Ironhide_*-setup.exe](https://github.com/YOUR_USERNAME/ironhide/releases/latest) |
-| Linux (AppImage) | [Ironhide_*.AppImage](https://github.com/YOUR_USERNAME/ironhide/releases/latest) |
-| Linux (Debian) | [Ironhide_*.deb](https://github.com/YOUR_USERNAME/ironhide/releases/latest) |
-| Linux (Fedora) | [Ironhide_*.rpm](https://github.com/YOUR_USERNAME/ironhide/releases/latest) |
+| macOS (Apple Silicon) | [Ironhide_*.dmg (arm64)](https://github.com/barkain/ironhide/releases/latest) |
+| macOS (Intel) | [Ironhide_*.dmg (x64)](https://github.com/barkain/ironhide/releases/latest) |
+| Windows | [Ironhide_*-setup.exe](https://github.com/barkain/ironhide/releases/latest) |
+| Linux (AppImage) | [Ironhide_*.AppImage](https://github.com/barkain/ironhide/releases/latest) |
+| Linux (Debian) | [Ironhide_*.deb](https://github.com/barkain/ironhide/releases/latest) |
+| Linux (Fedora) | [Ironhide_*.rpm](https://github.com/barkain/ironhide/releases/latest) |
 
 ### Build from Source
 
@@ -75,7 +75,7 @@ Download the latest release for your platform:
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/ironhide.git
+git clone https://github.com/barkain/ironhide.git
 cd ironhide
 
 # Install dependencies
