@@ -247,9 +247,12 @@ export function GanttChart({ sessions, className }: GanttChartProps) {
 
     for (const session of sessions) {
       const startMs = new Date(session.started_at).getTime();
-      const endMs = session.ended_at
-        ? new Date(session.ended_at).getTime()
-        : startMs + Math.max(session.duration_ms, 60000); // at least 1 min display
+      // Prefer duration_ms over ended_at since ended_at is often == started_at (DB bug)
+      const endMs = session.duration_ms > 0
+        ? startMs + session.duration_ms
+        : session.ended_at
+          ? Math.max(new Date(session.ended_at).getTime(), startMs + 60000)
+          : startMs + 60000;
 
       if (startMs < minMs) minMs = startMs;
       if (endMs > maxMs) maxMs = endMs;
@@ -474,12 +477,12 @@ export function GanttChart({ sessions, className }: GanttChartProps) {
                 {project.lanes.map((lane, laneIndex) =>
                   lane.map((session) => {
                     const startDate = parseISO(session.started_at);
-                    const endDate = session.ended_at
-                      ? parseISO(session.ended_at)
-                      : new Date(
-                          startDate.getTime() +
-                            Math.max(session.duration_ms, 60000)
-                        );
+                    // Prefer duration_ms over ended_at since ended_at is often == started_at (DB bug)
+                    const endDate = session.duration_ms > 0
+                      ? new Date(startDate.getTime() + session.duration_ms)
+                      : session.ended_at && new Date(session.ended_at).getTime() > startDate.getTime() + 60000
+                        ? parseISO(session.ended_at)
+                        : new Date(startDate.getTime() + 60000); // fallback 1 min minimum
 
                     const x1 = xScale(startDate);
                     const x2 = xScale(endDate);
