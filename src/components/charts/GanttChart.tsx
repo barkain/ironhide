@@ -247,9 +247,12 @@ export function GanttChart({ sessions, className }: GanttChartProps) {
 
     for (const session of sessions) {
       const startMs = new Date(session.started_at).getTime();
-      const endMs = session.ended_at
-        ? new Date(session.ended_at).getTime()
-        : startMs + Math.max(session.duration_ms, 60000); // at least 1 min display
+      // Prefer duration_ms over ended_at since ended_at is often == started_at (DB bug)
+      const endMs = session.duration_ms > 0
+        ? startMs + session.duration_ms
+        : session.ended_at
+          ? Math.max(new Date(session.ended_at).getTime(), startMs + 60000)
+          : startMs + 60000;
 
       if (startMs < minMs) minMs = startMs;
       if (endMs > maxMs) maxMs = endMs;
@@ -359,14 +362,14 @@ export function GanttChart({ sessions, className }: GanttChartProps) {
                 y1={HEADER_HEIGHT}
                 x2={x}
                 y2={chartHeight - PADDING_Y}
-                stroke="#3a3a40"
+                stroke="var(--color-border)"
                 strokeWidth={1}
               />
               <text
                 x={x}
                 y={HEADER_HEIGHT - 10}
                 textAnchor="middle"
-                fill="#9ca3af"
+                fill="var(--color-text-secondary)"
                 fontSize={13}
                 fontWeight={600}
                 fontFamily="system-ui, sans-serif"
@@ -383,7 +386,7 @@ export function GanttChart({ sessions, className }: GanttChartProps) {
           y1={HEADER_HEIGHT}
           x2={chartWidth}
           y2={HEADER_HEIGHT}
-          stroke="#2a2a2e"
+          stroke="var(--color-border)"
           strokeWidth={1}
         />
 
@@ -404,7 +407,7 @@ export function GanttChart({ sessions, className }: GanttChartProps) {
                   y={offset.y - PROJECT_GAP / 2}
                   width={chartWidth}
                   height={offset.height + PROJECT_GAP}
-                  fill="rgba(255, 255, 255, 0.02)"
+                  fill="rgba(128, 128, 128, 0.05)"
                 />
               )}
 
@@ -415,7 +418,7 @@ export function GanttChart({ sessions, className }: GanttChartProps) {
                   y1={offset.y - PROJECT_GAP / 2}
                   x2={chartWidth}
                   y2={offset.y - PROJECT_GAP / 2}
-                  stroke="#2a2a2e"
+                  stroke="var(--color-border)"
                   strokeWidth={0.5}
                 />
               )}
@@ -436,7 +439,7 @@ export function GanttChart({ sessions, className }: GanttChartProps) {
                   x={24}
                   y={rowCenterY}
                   dominantBaseline="central"
-                  fill="#e5e7eb"
+                  fill="var(--color-text-primary)"
                   fontSize={12}
                   fontFamily="system-ui, sans-serif"
                   fontWeight={500}
@@ -450,7 +453,7 @@ export function GanttChart({ sessions, className }: GanttChartProps) {
                   y={rowCenterY}
                   dominantBaseline="central"
                   textAnchor="end"
-                  fill="#6b7280"
+                  fill="var(--color-text-tertiary)"
                   fontSize={10}
                   fontFamily="system-ui, sans-serif"
                 >
@@ -465,7 +468,7 @@ export function GanttChart({ sessions, className }: GanttChartProps) {
                 y1={offset.y - PROJECT_GAP / 2}
                 x2={LABEL_WIDTH}
                 y2={offset.y + offset.height + PROJECT_GAP / 2}
-                stroke="#2a2a2e"
+                stroke="var(--color-border)"
                 strokeWidth={0.5}
               />
 
@@ -474,12 +477,12 @@ export function GanttChart({ sessions, className }: GanttChartProps) {
                 {project.lanes.map((lane, laneIndex) =>
                   lane.map((session) => {
                     const startDate = parseISO(session.started_at);
-                    const endDate = session.ended_at
-                      ? parseISO(session.ended_at)
-                      : new Date(
-                          startDate.getTime() +
-                            Math.max(session.duration_ms, 60000)
-                        );
+                    // Prefer duration_ms over ended_at since ended_at is often == started_at (DB bug)
+                    const endDate = session.duration_ms > 0
+                      ? new Date(startDate.getTime() + session.duration_ms)
+                      : session.ended_at && new Date(session.ended_at).getTime() > startDate.getTime() + 60000
+                        ? parseISO(session.ended_at)
+                        : new Date(startDate.getTime() + 60000); // fallback 1 min minimum
 
                     const x1 = xScale(startDate);
                     const x2 = xScale(endDate);
@@ -606,7 +609,7 @@ export function GanttChart({ sessions, className }: GanttChartProps) {
             transform: 'translateY(-100%)',
           }}
         >
-          <div className="rounded-lg border border-[var(--color-border)] bg-[#1a1a1c] p-3 shadow-xl min-w-[240px]">
+          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-xl min-w-[240px]">
             <div className="text-sm font-semibold text-white mb-1 truncate max-w-[280px]">
               {extractDisplayName(tooltip.session.project_path) || tooltip.session.project_name}
             </div>

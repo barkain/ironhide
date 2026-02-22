@@ -457,7 +457,21 @@ fn compute_session_summary(file_info: &SessionFileInfo) -> SessionSummary {
             ) = calculate_metrics_from_turns(&turns);
 
             let started_at = turns.first().map(|t| t.started_at.clone());
-            let last_activity = turns.last().and_then(|t| t.ended_at.clone());
+            // Find the last ended_at from any turn (not just the final turn, which often has None)
+            let last_activity = turns.iter().rev()
+                .find_map(|t| t.ended_at.clone())
+                .or_else(|| {
+                    // Fallback: compute from first started_at + duration
+                    if duration_ms > 0 {
+                        if let Some(ref start_str) = started_at {
+                            if let Ok(start) = chrono::DateTime::parse_from_rfc3339(start_str) {
+                                let end = start + chrono::Duration::milliseconds(duration_ms as i64);
+                                return Some(end.to_rfc3339());
+                            }
+                        }
+                    }
+                    turns.last().map(|t| t.started_at.clone())
+                });
             let model = models.into_iter().next();
 
             SessionSummary {

@@ -55,6 +55,26 @@ impl Database {
         let conn = self.conn.lock().map_err(|_| DbError::LockPoisoned)?;
         schema::create_tables(&conn)?;
         schema::insert_default_pricing(&conn)?;
+
+        // Migration: Fix last_activity_at for sessions where it was incorrectly set equal to started_at.
+        // Computes correct value from started_at + total_duration_ms from session_metrics.
+        conn.execute_batch(r#"
+            UPDATE sessions
+            SET last_activity_at = strftime('%Y-%m-%dT%H:%M:%fZ',
+                julianday(sessions.started_at) + (
+                    SELECT CAST(m.total_duration_ms AS REAL) / 86400000.0
+                    FROM session_metrics m
+                    WHERE m.session_id = sessions.session_id
+                )
+            )
+            WHERE sessions.last_activity_at = sessions.started_at
+            AND EXISTS (
+                SELECT 1 FROM session_metrics m
+                WHERE m.session_id = sessions.session_id
+                AND m.total_duration_ms > 0
+            );
+        "#)?;
+
         Ok(())
     }
 
