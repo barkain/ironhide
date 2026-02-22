@@ -1,6 +1,6 @@
 [package]
 name = "ironhide"
-version = "0.3.1"
+version = "0.4.0"
 description = "Ironhide - Analyze Claude Code sessions with deep insights, metrics, and recommendations"
 authors = ["Ironhide Contributors"]
 license = "MIT"

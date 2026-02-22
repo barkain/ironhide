@@ -1,7 +1,7 @@
 {
   "name": "ironhide",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Ironhide - Analyze Claude Code sessions with deep insights, metrics, and recommendations",
   "author": "Ironhide Contributors",
   "license": "MIT",
