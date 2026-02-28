@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout } from './components/layout/Layout';
 import { PageLoadingSpinner } from './components/ui/PageLoadingSpinner';
 import { preloadAllSessions } from './lib/tauri';
+import { useAppStore } from './lib/store';
 
 // Lazy load all page components for code splitting
 const Dashboard = React.lazy(() => import('./pages/Dashboard'));
@@ -42,6 +43,17 @@ function startPreload() {
 }
 
 function App() {
+  const theme = useAppStore((s) => s.theme);
+
+  // Keep the dark class on <html> in sync with the store
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [theme]);
+
   // Trigger preload on mount
   useEffect(() => {
     startPreload();

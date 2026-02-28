@@ -10,7 +10,7 @@ export function Skeleton({ className, style }: SkeletonProps) {
   return (
     <div
       className={cn(
-        'animate-pulse rounded bg-gray-700',
+        'animate-pulse rounded bg-[var(--color-surface-alt)]',
         className
       )}
       style={style}
@@ -52,7 +52,7 @@ export function StatCardSkeleton() {
 
 export function TableRowSkeleton({ columns = 5 }: { columns?: number }) {
   return (
-    <div className="flex items-center gap-4 p-4 border-b border-gray-800">
+    <div className="flex items-center gap-4 p-4 border-b border-[var(--color-border)]">
       {Array.from({ length: columns }).map((_, i) => (
         <Skeleton key={i} className="h-4 flex-1" />
       ))}
@@ -64,7 +64,7 @@ export function TableSkeleton({ rows = 5, columns = 5 }: { rows?: number; column
   return (
     <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-4 p-4 bg-gray-800/50 border-b border-gray-700">
+      <div className="flex items-center gap-4 p-4 bg-[var(--color-surface-alt)]/50 border-b border-[var(--color-border)]">
         {Array.from({ length: columns }).map((_, i) => (
           <Skeleton key={i} className="h-4 flex-1" />
         ))}
@@ -169,7 +169,7 @@ export function SessionDetailSkeleton() {
       </div>
 
       {/* Tabs skeleton */}
-      <div className="flex gap-2 border-b border-gray-700 pb-3">
+      <div className="flex gap-2 border-b border-[var(--color-border)] pb-3">
         {Array.from({ length: 6 }).map((_, i) => (
           <Skeleton key={i} className="h-10 w-24" />
         ))}

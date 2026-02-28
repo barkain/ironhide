@@ -22,6 +22,7 @@ import {
   getProjectDisplayName,
   cn,
 } from '../../lib/utils';
+import { useThemeColors } from '../../hooks/useThemeColors';
 import { compareSessions, getSessions, getSession, getTurns } from '../../lib/tauri';
 import type { SessionSummary, SessionDetail, TurnSummary } from '../../types';
 import {
@@ -282,6 +283,7 @@ interface ComparisonChartProps {
 }
 
 function ComparisonChart({ sessions, turnsData, metric }: ComparisonChartProps) {
+  const tc = useThemeColors();
   const colors = ['#3b82f6', '#10b981', '#a855f7'];
 
   // Build cumulative data for each session
@@ -317,27 +319,27 @@ function ComparisonChart({ sessions, turnsData, metric }: ComparisonChartProps) 
       <CardContent className="h-56">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2e" />
+            <CartesianGrid strokeDasharray="3 3" stroke={tc.gridStroke} />
             <XAxis
               dataKey="turn"
-              stroke="#6b7280"
+              stroke={tc.axisStroke}
               fontSize={12}
               tickLine={false}
-              label={{ value: 'Turn', position: 'bottom', offset: -5, fill: '#6b7280' }}
+              label={{ value: 'Turn', position: 'bottom', offset: -5, fill: tc.axisStroke }}
             />
             <YAxis
-              stroke="#6b7280"
+              stroke={tc.axisStroke}
               fontSize={12}
               tickLine={false}
               tickFormatter={(value) => formatter(value)}
             />
             <Tooltip
               contentStyle={{
-                backgroundColor: '#1a1a1c',
-                border: '1px solid #2a2a2e',
+                backgroundColor: tc.tooltipBg,
+                border: `1px solid ${tc.tooltipBorder}`,
                 borderRadius: '8px',
               }}
-              labelStyle={{ color: '#fff' }}
+              labelStyle={{ color: tc.tooltipText }}
               formatter={(value, name) => {
                 const index = parseInt(String(name).replace('session', ''));
                 const session = sessions[index];
@@ -374,6 +376,7 @@ interface ToolDistributionChartProps {
 }
 
 function ToolDistributionChart({ sessions, sessionDetails }: ToolDistributionChartProps) {
+  const tc = useThemeColors();
   const colors = ['#3b82f6', '#10b981', '#a855f7'];
 
   // Collect all tools across sessions
@@ -419,24 +422,24 @@ function ToolDistributionChart({ sessions, sessionDetails }: ToolDistributionCha
       <CardContent className="h-56">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2e" />
+            <CartesianGrid strokeDasharray="3 3" stroke={tc.gridStroke} />
             <XAxis
               dataKey="tool"
-              stroke="#6b7280"
+              stroke={tc.axisStroke}
               fontSize={10}
               tickLine={false}
               angle={-45}
               textAnchor="end"
               height={60}
             />
-            <YAxis stroke="#6b7280" fontSize={12} tickLine={false} />
+            <YAxis stroke={tc.axisStroke} fontSize={12} tickLine={false} />
             <Tooltip
               contentStyle={{
-                backgroundColor: '#1a1a1c',
-                border: '1px solid #2a2a2e',
+                backgroundColor: tc.tooltipBg,
+                border: `1px solid ${tc.tooltipBorder}`,
                 borderRadius: '8px',
               }}
-              labelStyle={{ color: '#fff' }}
+              labelStyle={{ color: tc.tooltipText }}
               formatter={(value, name) => {
                 const index = parseInt(String(name).replace('session', ''));
                 const session = sessions[index];

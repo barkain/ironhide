@@ -53,7 +53,7 @@ export function Sidebar() {
             <BarChart3 className="h-5 w-5 text-white" />
           </div>
           {!sidebarCollapsed && (
-            <span className="font-semibold text-white">Ironhide</span>
+            <span className="font-semibold text-[var(--color-text-primary)]">Ironhide</span>
           )}
         </div>
       </div>
@@ -70,7 +70,7 @@ export function Sidebar() {
                     'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors relative',
                     isActive
                       ? 'bg-[var(--color-primary-600)]/20 text-[var(--color-primary-400)]'
-                      : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                      : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]'
                   )
                 }
               >
@@ -102,7 +102,7 @@ export function Sidebar() {
       <div className="border-t border-[var(--color-border)] p-4">
         <button
           onClick={toggleSidebar}
-          className="flex w-full items-center justify-center rounded-lg px-3 py-2 text-gray-400 hover:bg-gray-800 hover:text-white"
+          className="flex w-full items-center justify-center rounded-lg px-3 py-2 text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
         >
           {sidebarCollapsed ? (
             <ChevronRight className="h-5 w-5" />

@@ -23,8 +23,8 @@ interface AppState {
   setSelectedProject: (project: string | null) => void;
 
   // Theme
-  theme: 'light' | 'dark' | 'system';
-  setTheme: (theme: 'light' | 'dark' | 'system') => void;
+  theme: 'light' | 'dark';
+  setTheme: (theme: 'light' | 'dark') => void;
 
   // Last sync time
   lastSyncTime: string | null;

@@ -8,6 +8,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../ui/Card';
+import { useThemeColors } from '../../hooks/useThemeColors';
 import type { EfficiencyMetrics } from '../../types';
 
 interface EfficiencyRadarChartProps {
@@ -111,9 +112,10 @@ interface CustomTooltipProps {
   payload?: Array<{
     payload: RadarDataPoint;
   }>;
+  themeColors?: ReturnType<typeof useThemeColors>;
 }
 
-function CustomTooltip({ active, payload }: CustomTooltipProps) {
+function CustomTooltip({ active, payload, themeColors }: CustomTooltipProps) {
   if (!active || !payload || payload.length === 0) {
     return null;
   }
@@ -123,19 +125,19 @@ function CustomTooltip({ active, payload }: CustomTooltipProps) {
   return (
     <div
       style={{
-        backgroundColor: '#1a1a1c',
-        border: '1px solid #2a2a2e',
+        backgroundColor: themeColors?.tooltipBg ?? '#1a1a1c',
+        border: `1px solid ${themeColors?.tooltipBorder ?? '#2a2a2e'}`,
         borderRadius: '8px',
         padding: '10px 14px',
       }}
     >
-      <p style={{ color: '#fff', fontWeight: 600, marginBottom: 4 }}>
+      <p style={{ color: themeColors?.tooltipText ?? '#fff', fontWeight: 600, marginBottom: 4 }}>
         {data.fullMetric}
       </p>
-      <p style={{ color: '#9ca3af', fontSize: 14 }}>
+      <p style={{ color: themeColors?.textSecondary ?? '#9ca3af', fontSize: 14 }}>
         Score: {(data.value * 100).toFixed(1)}%
       </p>
-      <p style={{ color: '#6b7280', fontSize: 12 }}>
+      <p style={{ color: themeColors?.textTertiary ?? '#6b7280', fontSize: 12 }}>
         {data.rawLabel}
       </p>
     </div>
@@ -143,6 +145,8 @@ function CustomTooltip({ active, payload }: CustomTooltipProps) {
 }
 
 export function EfficiencyRadarChart({ efficiency, isLoading }: EfficiencyRadarChartProps) {
+  const tc = useThemeColors();
+
   if (isLoading) {
     return (
       <Card className="h-80">
@@ -175,7 +179,7 @@ export function EfficiencyRadarChart({ efficiency, isLoading }: EfficiencyRadarC
               </linearGradient>
             </defs>
             <PolarGrid
-              stroke="#2a2a2e"
+              stroke={tc.gridStroke}
               gridType="polygon"
             />
             <PolarRadiusAxis
@@ -188,7 +192,7 @@ export function EfficiencyRadarChart({ efficiency, isLoading }: EfficiencyRadarC
             <PolarAngleAxis
               dataKey="metric"
               tick={{
-                fill: '#9ca3af',
+                fill: tc.textSecondary,
                 fontSize: 11,
               }}
               tickLine={false}
@@ -201,7 +205,7 @@ export function EfficiencyRadarChart({ efficiency, isLoading }: EfficiencyRadarC
               fillOpacity={0.6}
               strokeWidth={2}
             />
-            <Tooltip content={<CustomTooltip />} />
+            <Tooltip content={<CustomTooltip themeColors={tc} />} />
           </RadarChart>
         </ResponsiveContainer>
       </CardContent>

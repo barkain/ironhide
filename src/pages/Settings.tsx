@@ -4,7 +4,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../co
 import { Button } from '../components/ui/Button';
 import { getSettings, updateSettings, type AppSettings } from '../lib/tauri';
 import { useAppStore } from '../lib/store';
-import { FolderOpen, RefreshCw, Palette, Save } from 'lucide-react';
+import { FolderOpen, RefreshCw, Sun, Moon, Save } from 'lucide-react';
 
 function Settings() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -12,7 +12,7 @@ function Settings() {
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
 
-  const { setTheme } = useAppStore();
+  const { theme, setTheme } = useAppStore();
 
   useEffect(() => {
     loadSettings();
@@ -56,7 +56,14 @@ function Settings() {
     setHasChanges(true);
 
     if (key === 'theme') {
-      setTheme(value as 'light' | 'dark' | 'system');
+      const themeValue = value as 'light' | 'dark';
+      setTheme(themeValue);
+      // Apply immediately
+      if (themeValue === 'dark') {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
     }
   }
 
@@ -66,8 +73,8 @@ function Settings() {
         <Header title="Settings" />
         <div className="flex-1 p-6">
           <div className="animate-pulse space-y-4">
-            <div className="h-32 rounded-lg bg-gray-700" />
-            <div className="h-32 rounded-lg bg-gray-700" />
+            <div className="h-32 rounded-lg bg-[var(--color-surface-alt)]" />
+            <div className="h-32 rounded-lg bg-[var(--color-surface-alt)]" />
           </div>
         </div>
       </div>
@@ -95,17 +102,17 @@ function Settings() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-2">
                 Claude Home Path
               </label>
               <input
                 type="text"
                 value={settings?.claudeHomePath || ''}
                 onChange={(e) => handleChange('claudeHomePath', e.target.value)}
-                className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-4 py-2 text-white placeholder-gray-500 focus:border-[var(--color-primary-500)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary-500)]"
+                className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-4 py-2 text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary-500)]"
                 placeholder="~/.claude"
               />
-              <p className="mt-1 text-xs text-gray-500">
+              <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
                 The directory where Claude Code stores session data (usually ~/.claude)
               </p>
             </div>
@@ -126,15 +133,15 @@ function Settings() {
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-white">Enable auto refresh</p>
-                <p className="text-xs text-gray-500">
+                <p className="text-sm font-medium text-[var(--color-text-primary)]">Enable auto refresh</p>
+                <p className="text-xs text-[var(--color-text-tertiary)]">
                   Periodically check for new session data
                 </p>
               </div>
               <button
                 onClick={() => handleChange('autoRefresh', !settings?.autoRefresh)}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  settings?.autoRefresh ? 'bg-[var(--color-primary-600)]' : 'bg-gray-600'
+                  settings?.autoRefresh ? 'bg-[var(--color-primary-600)]' : 'bg-[var(--color-surface-alt)]'
                 }`}
               >
                 <span
@@ -147,7 +154,7 @@ function Settings() {
 
             {settings?.autoRefresh && (
               <div>
-                <label className="block text-sm font-medium text-gray-400 mb-2">
+                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-2">
                   Refresh interval (minutes)
                 </label>
                 <input
@@ -158,7 +165,7 @@ function Settings() {
                   onChange={(e) =>
                     handleChange('refreshIntervalMinutes', parseInt(e.target.value, 10) || 5)
                   }
-                  className="w-24 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-4 py-2 text-white placeholder-gray-500 focus:border-[var(--color-primary-500)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary-500)]"
+                  className="w-24 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-4 py-2 text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary-500)]"
                 />
               </div>
             )}
@@ -169,7 +176,7 @@ function Settings() {
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2">
-              <Palette className="h-5 w-5 text-[var(--color-primary-400)]" />
+              <Sun className="h-5 w-5 text-[var(--color-primary-400)]" />
               <CardTitle>Appearance</CardTitle>
             </div>
             <CardDescription>
@@ -178,20 +185,39 @@ function Settings() {
           </CardHeader>
           <CardContent>
             <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-3">
                 Theme
               </label>
-              <select
-                value={settings?.theme || 'dark'}
-                onChange={(e) =>
-                  handleChange('theme', e.target.value as 'light' | 'dark' | 'system')
-                }
-                className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-4 py-2 text-white focus:border-[var(--color-primary-500)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary-500)]"
-              >
-                <option value="dark">Dark</option>
-                <option value="light">Light</option>
-                <option value="system">System</option>
-              </select>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setTheme('light');
+                    document.documentElement.classList.remove('dark');
+                  }}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    theme === 'light'
+                      ? 'bg-[var(--color-primary-600)] text-white'
+                      : 'bg-[var(--color-background)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                  }`}
+                >
+                  <Sun className="h-4 w-4" />
+                  Light
+                </button>
+                <button
+                  onClick={() => {
+                    setTheme('dark');
+                    document.documentElement.classList.add('dark');
+                  }}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    theme === 'dark'
+                      ? 'bg-[var(--color-primary-600)] text-white'
+                      : 'bg-[var(--color-background)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                  }`}
+                >
+                  <Moon className="h-4 w-4" />
+                  Dark
+                </button>
+              </div>
             </div>
           </CardContent>
         </Card>

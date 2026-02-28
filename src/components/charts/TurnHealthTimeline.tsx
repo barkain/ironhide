@@ -110,7 +110,7 @@ function TurnMarker({
       {showTooltip && (
         <div
           className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 z-10
-                     bg-[#1a1a1c] border border-[var(--color-border)] rounded-lg p-3 shadow-lg
+                     bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg p-3 shadow-lg
                      whitespace-nowrap min-w-[200px]"
         >
           <div className="text-sm font-semibold text-white mb-2">
@@ -153,7 +153,7 @@ function TurnMarker({
           </div>
           {/* Tooltip arrow */}
           <div className="absolute top-full left-1/2 transform -translate-x-1/2
-                          border-8 border-transparent border-t-[#2a2a2e]" />
+                          border-8 border-transparent border-t-[var(--color-border)]" />
         </div>
       )}
 

@@ -20,6 +20,7 @@ import {
   formatNumber,
   formatCompactNumber,
 } from '../lib/utils';
+import { useThemeColors } from '../hooks/useThemeColors';
 import {
   DollarSign,
   TrendingUp,
@@ -44,6 +45,7 @@ interface TrendSummary {
 }
 
 function Trends() {
+  const tc = useThemeColors();
   const [timeRange, setTimeRange] = useState<TimeRange>('30d');
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
@@ -235,21 +237,21 @@ function Trends() {
                         <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2e" />
-                    <XAxis dataKey="date" stroke="#6b7280" fontSize={12} tickLine={false} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={tc.gridStroke} />
+                    <XAxis dataKey="date" stroke={tc.axisStroke} fontSize={12} tickLine={false} />
                     <YAxis
-                      stroke="#6b7280"
+                      stroke={tc.axisStroke}
                       fontSize={12}
                       tickLine={false}
                       tickFormatter={(value) => formatCurrency(value)}
                     />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: '#1a1a1c',
-                        border: '1px solid #2a2a2e',
+                        backgroundColor: tc.tooltipBg,
+                        border: `1px solid ${tc.tooltipBorder}`,
                         borderRadius: '8px',
                       }}
-                      labelStyle={{ color: '#fff' }}
+                      labelStyle={{ color: tc.tooltipText }}
                       formatter={(value: number | undefined) => value !== undefined ? [formatCurrency(value), 'Cost'] : ['', 'Cost']}
                     />
                     <Area
@@ -283,10 +285,10 @@ function Trends() {
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2e" />
-                    <XAxis dataKey="date" stroke="#6b7280" fontSize={12} tickLine={false} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={tc.gridStroke} />
+                    <XAxis dataKey="date" stroke={tc.axisStroke} fontSize={12} tickLine={false} />
                     <YAxis
-                      stroke="#6b7280"
+                      stroke={tc.axisStroke}
                       fontSize={12}
                       tickLine={false}
                       domain={[0, 100]}
@@ -294,11 +296,11 @@ function Trends() {
                     />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: '#1a1a1c',
-                        border: '1px solid #2a2a2e',
+                        backgroundColor: tc.tooltipBg,
+                        border: `1px solid ${tc.tooltipBorder}`,
                         borderRadius: '8px',
                       }}
-                      labelStyle={{ color: '#fff' }}
+                      labelStyle={{ color: tc.tooltipText }}
                       formatter={(value: number | undefined) => value !== undefined ? [`${value.toFixed(1)}%`, 'Efficiency'] : ['', 'Efficiency']}
                     />
                     <Line
@@ -333,11 +335,11 @@ function Trends() {
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2e" />
-                    <XAxis dataKey="date" stroke="#6b7280" fontSize={12} tickLine={false} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={tc.gridStroke} />
+                    <XAxis dataKey="date" stroke={tc.axisStroke} fontSize={12} tickLine={false} />
                     <YAxis
                       yAxisId="left"
-                      stroke="#6b7280"
+                      stroke={tc.axisStroke}
                       fontSize={12}
                       tickLine={false}
                       label={{ value: 'User Sessions', angle: -90, position: 'insideLeft', style: { fill: '#6b7280', fontSize: 11 } }}
@@ -345,18 +347,18 @@ function Trends() {
                     <YAxis
                       yAxisId="right"
                       orientation="right"
-                      stroke="#6b7280"
+                      stroke={tc.axisStroke}
                       fontSize={12}
                       tickLine={false}
                       label={{ value: 'Subagents', angle: 90, position: 'insideRight', style: { fill: '#6b7280', fontSize: 11 } }}
                     />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: '#1a1a1c',
-                        border: '1px solid #2a2a2e',
+                        backgroundColor: tc.tooltipBg,
+                        border: `1px solid ${tc.tooltipBorder}`,
                         borderRadius: '8px',
                       }}
-                      labelStyle={{ color: '#fff' }}
+                      labelStyle={{ color: tc.tooltipText }}
                     />
                     <Legend />
                     <Bar
@@ -405,21 +407,21 @@ function Trends() {
                         <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2e" />
-                    <XAxis dataKey="date" stroke="#6b7280" fontSize={12} tickLine={false} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={tc.gridStroke} />
+                    <XAxis dataKey="date" stroke={tc.axisStroke} fontSize={12} tickLine={false} />
                     <YAxis
-                      stroke="#6b7280"
+                      stroke={tc.axisStroke}
                       fontSize={12}
                       tickLine={false}
                       tickFormatter={(value) => formatCompactNumber(value)}
                     />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: '#1a1a1c',
-                        border: '1px solid #2a2a2e',
+                        backgroundColor: tc.tooltipBg,
+                        border: `1px solid ${tc.tooltipBorder}`,
                         borderRadius: '8px',
                       }}
-                      labelStyle={{ color: '#fff' }}
+                      labelStyle={{ color: tc.tooltipText }}
                       formatter={(value: number | undefined) => value !== undefined ? [formatCompactNumber(value), 'Tokens'] : ['', 'Tokens']}
                     />
                     <Area

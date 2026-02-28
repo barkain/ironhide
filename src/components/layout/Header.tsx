@@ -30,8 +30,8 @@ export function Header({ title, subtitle, showDateFilter = true, showQuickFilter
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-6">
       <div>
-        <h1 className="text-xl font-semibold text-white">{title}</h1>
-        {subtitle && <p className="text-sm text-gray-400">{subtitle}</p>}
+        <h1 className="text-xl font-semibold text-[var(--color-text-primary)]">{title}</h1>
+        {subtitle && <p className="text-sm text-[var(--color-text-secondary)]">{subtitle}</p>}
       </div>
 
       <div className="flex items-center gap-4">
@@ -59,7 +59,7 @@ export function Header({ title, subtitle, showDateFilter = true, showQuickFilter
 
         {/* Last sync time */}
         {lastSyncTime && (
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-[var(--color-text-tertiary)]">
             Last synced: {formatRelativeTime(lastSyncTime)}
           </span>
         )}

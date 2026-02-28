@@ -188,6 +188,23 @@ export function getProjectName(projectPath: string): string {
   return parts[parts.length - 1] || projectPath;
 }
 
+/**
+ * Get resolved CSS custom property values for use in Recharts and other
+ * libraries that need raw colour strings rather than CSS var() references.
+ */
+export function getThemeColors() {
+  const style = getComputedStyle(document.documentElement);
+  return {
+    background: style.getPropertyValue('--color-background').trim(),
+    surface: style.getPropertyValue('--color-surface').trim(),
+    border: style.getPropertyValue('--color-border').trim(),
+    textPrimary: style.getPropertyValue('--color-text-primary').trim(),
+    textSecondary: style.getPropertyValue('--color-text-secondary').trim(),
+    textMuted: style.getPropertyValue('--color-text-muted').trim(),
+    surfaceHover: style.getPropertyValue('--color-surface-hover').trim(),
+  };
+}
+
 export function calculateCacheHitRate(cacheRead: number, cacheWrite: number): number {
   const total = cacheRead + cacheWrite;
   if (total === 0) return 0;

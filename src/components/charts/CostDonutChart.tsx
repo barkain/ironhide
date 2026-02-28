@@ -10,6 +10,7 @@ import {
 import type { PieSectorDataItem } from 'recharts/types/polar/Pie';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
 import { formatCurrency } from '../../lib/utils';
+import { useThemeColors } from '../../hooks/useThemeColors';
 import type { CostSummary } from '../../types';
 
 interface CostDonutChartProps {
@@ -72,9 +73,10 @@ interface CustomTooltipProps {
     payload: ChartDataItem;
   }>;
   totalCost: number;
+  themeColors?: ReturnType<typeof useThemeColors>;
 }
 
-function CustomTooltip({ active, payload, totalCost }: CustomTooltipProps) {
+function CustomTooltip({ active, payload, totalCost, themeColors }: CustomTooltipProps) {
   if (!active || !payload || payload.length === 0) {
     return null;
   }
@@ -85,11 +87,11 @@ function CustomTooltip({ active, payload, totalCost }: CustomTooltipProps) {
   return (
     <div
       style={{
-        backgroundColor: '#1a1a1c',
-        border: '1px solid #2a2a2e',
+        backgroundColor: themeColors?.tooltipBg ?? '#1a1a1c',
+        border: `1px solid ${themeColors?.tooltipBorder ?? '#2a2a2e'}`,
         borderRadius: '8px',
         padding: '12px',
-        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
       }}
     >
       <div className="flex items-center gap-2 mb-1">
@@ -110,6 +112,7 @@ function CustomTooltip({ active, payload, totalCost }: CustomTooltipProps) {
 }
 
 export function CostDonutChart({ cost, isLoading }: CostDonutChartProps) {
+  const tc = useThemeColors();
   const [activeIndex, setActiveIndex] = useState<number | undefined>(undefined);
 
   const onPieEnter = useCallback((_: unknown, index: number) => {
@@ -212,14 +215,14 @@ export function CostDonutChart({ cost, isLoading }: CostDonutChartProps) {
               ))}
             </Pie>
             <Tooltip
-              content={<CustomTooltip totalCost={cost.total_cost} />}
+              content={<CustomTooltip totalCost={cost.total_cost} themeColors={tc} />}
             />
             {/* Custom center label */}
             <text x="50%" y="45%" textAnchor="middle" dominantBaseline="middle">
               <tspan
                 x="50%"
                 dy="-4"
-                fill="#9ca3af"
+                fill={tc.textSecondary}
                 style={{ fontSize: '12px' }}
               >
                 Total Cost
@@ -229,7 +232,7 @@ export function CostDonutChart({ cost, isLoading }: CostDonutChartProps) {
               <tspan
                 x="50%"
                 dy="4"
-                fill="#ffffff"
+                fill={tc.textPrimary}
                 fontWeight="600"
                 style={{ fontSize: '16px' }}
               >

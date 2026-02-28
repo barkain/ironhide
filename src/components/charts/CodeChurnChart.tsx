@@ -11,6 +11,7 @@ import {
 } from 'recharts';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
 import { formatCompactNumber } from '../../lib/utils';
+import { useThemeColors } from '../../hooks/useThemeColors';
 
 interface CodeChurnData {
   turn: number;
@@ -25,6 +26,8 @@ interface CodeChurnChartProps {
 }
 
 export function CodeChurnChart({ data, isLoading, title = 'Code Churn by Turn' }: CodeChurnChartProps) {
+  const tc = useThemeColors();
+
   if (isLoading) {
     return (
       <Card className="h-80">
@@ -75,29 +78,29 @@ export function CodeChurnChart({ data, isLoading, title = 'Code Churn by Turn' }
       <CardContent className="h-56">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={chartData} stackOffset="sign">
-            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2e" />
+            <CartesianGrid strokeDasharray="3 3" stroke={tc.gridStroke} />
             <XAxis
               dataKey="turn"
-              stroke="#6b7280"
+              stroke={tc.axisStroke}
               fontSize={12}
               tickLine={false}
-              label={{ value: 'Turn', position: 'insideBottom', offset: -5, fill: '#6b7280', fontSize: 11 }}
+              label={{ value: 'Turn', position: 'insideBottom', offset: -5, fill: tc.axisStroke, fontSize: 11 }}
             />
             <YAxis
-              stroke="#6b7280"
+              stroke={tc.axisStroke}
               fontSize={12}
               tickLine={false}
               domain={yDomain}
               tickFormatter={(value) => formatCompactNumber(Math.abs(value))}
-              label={{ value: 'Lines', angle: -90, position: 'insideLeft', fill: '#6b7280', fontSize: 11 }}
+              label={{ value: 'Lines', angle: -90, position: 'insideLeft', fill: tc.axisStroke, fontSize: 11 }}
             />
             <Tooltip
               contentStyle={{
-                backgroundColor: '#1a1a1c',
-                border: '1px solid #2a2a2e',
+                backgroundColor: tc.tooltipBg,
+                border: `1px solid ${tc.tooltipBorder}`,
                 borderRadius: '8px',
               }}
-              labelStyle={{ color: '#fff' }}
+              labelStyle={{ color: tc.tooltipText }}
               labelFormatter={(label) => `Turn ${label}`}
               formatter={(_value, name, props) => {
                 const payload = props.payload;
@@ -119,7 +122,7 @@ export function CodeChurnChart({ data, isLoading, title = 'Code Churn by Turn' }
                 const netSign = netChange >= 0 ? '+' : '';
 
                 return (
-                  <div className="bg-[#1a1a1c] border border-[#2a2a2e] rounded-lg p-3 shadow-lg">
+                  <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg p-3 shadow-lg">
                     <p className="text-white font-medium mb-2">Turn {label}</p>
                     <div className="space-y-1 text-sm">
                       <p className="text-[#10b981]">
@@ -128,7 +131,7 @@ export function CodeChurnChart({ data, isLoading, title = 'Code Churn by Turn' }
                       <p className="text-[#ef4444]">
                         -{formatCompactNumber(data.rawRemoved)} lines removed
                       </p>
-                      <div className="border-t border-[#2a2a2e] pt-1 mt-1">
+                      <div className="border-t border-[var(--color-border)] pt-1 mt-1">
                         <p style={{ color: netColor }}>
                           Net: {netSign}{formatCompactNumber(netChange)} lines
                         </p>
@@ -138,7 +141,7 @@ export function CodeChurnChart({ data, isLoading, title = 'Code Churn by Turn' }
                 );
               }}
             />
-            <ReferenceLine y={0} stroke="#6b7280" strokeWidth={1} />
+            <ReferenceLine y={0} stroke={tc.axisStroke} strokeWidth={1} />
             <Bar dataKey="added" name="added" stackId="stack" radius={[4, 4, 0, 0]}>
               {chartData.map((_, index) => (
                 <Cell key={`added-${index}`} fill="#10b981" />

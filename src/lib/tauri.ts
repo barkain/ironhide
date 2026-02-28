@@ -112,7 +112,7 @@ export interface AppSettings {
   claudeHomePath: string;
   autoRefresh: boolean;
   refreshIntervalMinutes: number;
-  theme: 'light' | 'dark' | 'system';
+  theme: 'light' | 'dark';
 }
 
 // Settings are managed client-side for now

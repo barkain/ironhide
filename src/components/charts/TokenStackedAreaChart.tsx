@@ -11,6 +11,7 @@ import {
   Brush,
 } from 'recharts';
 import { formatCompactNumber } from '../../lib/utils';
+import { useThemeColors } from '../../hooks/useThemeColors';
 import type { TurnSummary } from '../../types';
 
 /** Data point for token stacked area chart */
@@ -86,7 +87,7 @@ function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
 
   return (
     <div
-      className="rounded-lg border border-[#2a2a2e] bg-[#1a1a1c] p-3 shadow-lg"
+      className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-lg"
     >
       <p className="mb-2 font-medium text-white">{label}</p>
       <div className="space-y-1">
@@ -104,7 +105,7 @@ function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
             </span>
           </div>
         ))}
-        <div className="mt-2 border-t border-[#2a2a2e] pt-2">
+        <div className="mt-2 border-t border-[var(--color-border)] pt-2">
           <div className="flex items-center justify-between gap-4">
             <span className="text-sm font-medium text-gray-300">Total</span>
             <span className="text-sm font-bold text-white">
@@ -141,6 +142,7 @@ export function TokenStackedAreaChart({
   height = 400,
   showBrush = true,
 }: TokenStackedAreaChartProps) {
+  const tc = useThemeColors();
   // Track which series are visible (for toggleable legend)
   const [visibleSeries, setVisibleSeries] = useState({
     inputTokens: true,
@@ -181,7 +183,7 @@ export function TokenStackedAreaChart({
                 type="button"
                 className={`flex items-center gap-2 rounded px-2 py-1 text-sm transition-opacity ${
                   isVisible ? 'opacity-100' : 'opacity-40'
-                } hover:bg-[#2a2a2e]`}
+                } hover:bg-[var(--color-surface-hover)]`}
                 onClick={() => handleLegendClick(dataKey)}
               >
                 <div
@@ -274,21 +276,21 @@ export function TokenStackedAreaChart({
               </linearGradient>
             </defs>
 
-            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2e" />
+            <CartesianGrid strokeDasharray="3 3" stroke={tc.gridStroke} />
 
             <XAxis
               dataKey="label"
-              stroke="#6b7280"
+              stroke={tc.axisStroke}
               fontSize={12}
               tickLine={false}
-              axisLine={{ stroke: '#2a2a2e' }}
+              axisLine={{ stroke: tc.gridStroke }}
             />
 
             <YAxis
-              stroke="#6b7280"
+              stroke={tc.axisStroke}
               fontSize={12}
               tickLine={false}
-              axisLine={{ stroke: '#2a2a2e' }}
+              axisLine={{ stroke: tc.gridStroke }}
               tickFormatter={(value) => formatCompactNumber(value)}
             />
 
@@ -349,7 +351,7 @@ export function TokenStackedAreaChart({
                 dataKey="label"
                 height={30}
                 stroke="#3b82f6"
-                fill="#1a1a1c"
+                fill={tc.surface}
                 tickFormatter={() => ''}
               />
             )}

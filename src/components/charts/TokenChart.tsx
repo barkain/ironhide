@@ -10,6 +10,7 @@ import {
 } from 'recharts';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
 import { formatCompactNumber } from '../../lib/utils';
+import { useThemeColors } from '../../hooks/useThemeColors';
 import type { DailyMetrics } from '../../types';
 
 interface TokenChartProps {
@@ -18,6 +19,8 @@ interface TokenChartProps {
 }
 
 export function TokenChart({ data, isLoading }: TokenChartProps) {
+  const tc = useThemeColors();
+
   if (isLoading) {
     return (
       <Card className="h-80">
@@ -74,26 +77,26 @@ export function TokenChart({ data, isLoading }: TokenChartProps) {
                 <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2e" />
+            <CartesianGrid strokeDasharray="3 3" stroke={tc.gridStroke} />
             <XAxis
               dataKey="date"
-              stroke="#6b7280"
+              stroke={tc.axisStroke}
               fontSize={12}
               tickLine={false}
             />
             <YAxis
-              stroke="#6b7280"
+              stroke={tc.axisStroke}
               fontSize={12}
               tickLine={false}
               tickFormatter={(value) => formatCompactNumber(value)}
             />
             <Tooltip
               contentStyle={{
-                backgroundColor: '#1a1a1c',
-                border: '1px solid #2a2a2e',
+                backgroundColor: tc.tooltipBg,
+                border: `1px solid ${tc.tooltipBorder}`,
                 borderRadius: '8px',
               }}
-              labelStyle={{ color: '#fff' }}
+              labelStyle={{ color: tc.tooltipText }}
               formatter={(value, name) => {
                 if (value === undefined) return ['', name];
                 const formattedValue = formatCompactNumber(value as number);

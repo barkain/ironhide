@@ -10,6 +10,7 @@ import {
 } from 'recharts';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
 import { formatCurrency, getProjectDisplayName } from '../../lib/utils';
+import { useThemeColors } from '../../hooks/useThemeColors';
 import type { ProjectMetrics } from '../../types';
 
 interface CostChartProps {
@@ -20,6 +21,8 @@ interface CostChartProps {
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
 export function CostChart({ data, isLoading }: CostChartProps) {
+  const tc = useThemeColors();
+
   if (isLoading) {
     return (
       <Card className="h-80">
@@ -65,10 +68,10 @@ export function CostChart({ data, isLoading }: CostChartProps) {
       <CardContent className="h-56">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={chartData} layout="vertical">
-            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2e" horizontal={true} vertical={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke={tc.gridStroke} horizontal={true} vertical={false} />
             <XAxis
               type="number"
-              stroke="#6b7280"
+              stroke={tc.axisStroke}
               fontSize={12}
               tickLine={false}
               tickFormatter={(value) => formatCurrency(value)}
@@ -76,18 +79,18 @@ export function CostChart({ data, isLoading }: CostChartProps) {
             <YAxis
               type="category"
               dataKey="name"
-              stroke="#6b7280"
+              stroke={tc.axisStroke}
               fontSize={12}
               tickLine={false}
               width={100}
             />
             <Tooltip
               contentStyle={{
-                backgroundColor: '#1a1a1c',
-                border: '1px solid #2a2a2e',
+                backgroundColor: tc.tooltipBg,
+                border: `1px solid ${tc.tooltipBorder}`,
                 borderRadius: '8px',
               }}
-              labelStyle={{ color: '#fff' }}
+              labelStyle={{ color: tc.tooltipText }}
               formatter={(value, _name, props) => {
                 if (value === undefined) return ['', ''];
                 const formattedValue = formatCurrency(value as number);

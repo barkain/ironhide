@@ -39,7 +39,7 @@ interface CardTitleProps {
 
 export function CardTitle({ children, className }: CardTitleProps) {
   return (
-    <h3 className={cn('text-lg font-semibold text-white', className)}>
+    <h3 className={cn('text-lg font-semibold text-[var(--color-text-primary)]', className)}>
       {children}
     </h3>
   );
@@ -52,7 +52,7 @@ interface CardDescriptionProps {
 
 export function CardDescription({ children, className }: CardDescriptionProps) {
   return (
-    <p className={cn('text-sm text-gray-400', className)}>
+    <p className={cn('text-sm text-[var(--color-text-secondary)]', className)}>
       {children}
     </p>
   );
