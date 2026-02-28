@@ -17,6 +17,7 @@ export interface SessionSummary {
   total_tokens: number;
   duration_ms: number;
   is_subagent: boolean;
+  summary: string | null;
   file_path: string;
 }
 

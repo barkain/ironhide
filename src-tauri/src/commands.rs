@@ -54,6 +54,7 @@ pub struct SessionSummary {
     pub duration_ms: u64,
     pub is_subagent: bool,
     pub file_path: String,
+    pub summary: Option<String>,
 }
 
 /// Full session detail with all metrics
@@ -474,6 +475,13 @@ fn compute_session_summary(file_info: &SessionFileInfo) -> SessionSummary {
                 });
             let model = models.into_iter().next();
 
+            let summary = turns.iter()
+                .find_map(|t| {
+                    t.user_message.as_ref()
+                        .filter(|m| !m.is_empty())
+                        .map(|m| if m.len() > 200 { m[..200].to_string() } else { m.clone() })
+                });
+
             SessionSummary {
                 id: file_info.session_id.clone(),
                 project_path: file_info.project_path.clone().unwrap_or_default(),
@@ -489,6 +497,7 @@ fn compute_session_summary(file_info: &SessionFileInfo) -> SessionSummary {
                 duration_ms,
                 is_subagent: file_info.is_subagent,
                 file_path: file_info.path.to_string_lossy().to_string(),
+                summary,
             }
         }
         Err(_) => {
@@ -508,6 +517,7 @@ fn compute_session_summary(file_info: &SessionFileInfo) -> SessionSummary {
                 duration_ms: 0,
                 is_subagent: file_info.is_subagent,
                 file_path: file_info.path.to_string_lossy().to_string(),
+                summary: None,
             }
         }
     }
@@ -786,6 +796,7 @@ pub async fn get_sessions(
                         duration_ms: s.duration_ms,
                         is_subagent: s.is_subagent,
                         file_path: s.file_path,
+                        summary: s.summary,
                     })
                     .collect();
                 return Ok(summaries);
@@ -1193,6 +1204,7 @@ fn convert_db_cache_to_summary(
         // Use file_info for current file state (subagent status and path)
         is_subagent: file_info.is_subagent,
         file_path: file_info.path.to_string_lossy().to_string(),
+        summary: None,
     }
 }
 
@@ -1523,6 +1535,7 @@ pub async fn get_sessions_filtered(
                         duration_ms: s.duration_ms,
                         is_subagent: s.is_subagent,
                         file_path: s.file_path,
+                        summary: s.summary,
                     })
                     .collect();
                 return Ok(summaries);
@@ -1606,6 +1619,7 @@ pub async fn get_sessions_by_project(
                         duration_ms: s.duration_ms,
                         is_subagent: s.is_subagent,
                         file_path: s.file_path,
+                        summary: s.summary,
                     })
                     .collect();
                 return Ok(summaries);
@@ -1746,6 +1760,13 @@ pub async fn compare_sessions(
 
         metrics_data.push((total_breakdown.total_cost, total_tokens_val, cer, duration_ms));
 
+        let summary = turns.iter()
+            .find_map(|t| {
+                t.user_message.as_ref()
+                    .filter(|m| !m.is_empty())
+                    .map(|m| if m.len() > 200 { m[..200].to_string() } else { m.clone() })
+            });
+
         summaries.push(SessionSummary {
             id: file_info.session_id.clone(),
             project_path: file_info.project_path.clone().unwrap_or_default(),
@@ -1759,6 +1780,7 @@ pub async fn compare_sessions(
             duration_ms,
             is_subagent: file_info.is_subagent,
             file_path: file_info.path.to_string_lossy().to_string(),
+            summary,
         });
     }
 
@@ -3008,6 +3030,7 @@ mod tests {
             duration_ms: 900000,
             is_subagent: false,
             file_path: "/path/to/file.jsonl".to_string(),
+            summary: None,
         };
 
         let json = serde_json::to_string(&summary).unwrap();
@@ -3128,6 +3151,7 @@ mod tests {
             duration_ms: 600000,
             is_subagent: false,
             file_path: "/path/to/session1.jsonl".to_string(),
+            summary: None,
         };
 
         let session2 = SessionSummary {
@@ -3143,6 +3167,7 @@ mod tests {
             duration_ms: 720000,
             is_subagent: false,
             file_path: "/path/to/session2.jsonl".to_string(),
+            summary: None,
         };
 
         let comparison = SessionComparison {

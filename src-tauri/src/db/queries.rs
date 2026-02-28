@@ -461,6 +461,7 @@ pub struct FrontendSessionSummary {
     pub duration_ms: u64,
     pub is_subagent: bool,
     pub file_path: String,
+    pub summary: Option<String>,
 }
 
 /// Get all sessions from the DB with fields needed for the frontend SessionSummary.
@@ -484,7 +485,8 @@ pub fn get_sessions_for_frontend(
             COALESCE(m.total_turns, 0) as total_turns,
             COALESCE(m.total_cost, 0.0) as total_cost,
             COALESCE(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write, 0) as total_tokens,
-            COALESCE(m.total_duration_ms, 0) as duration_ms
+            COALESCE(m.total_duration_ms, 0) as duration_ms,
+            (SELECT SUBSTR(t.user_message, 1, 200) FROM turns t WHERE t.session_id = s.session_id AND t.user_message IS NOT NULL AND t.user_message != '' ORDER BY t.turn_number ASC LIMIT 1) as summary
         FROM sessions s
         LEFT JOIN session_metrics m ON s.session_id = m.session_id
         WHERE COALESCE(m.total_turns, 0) > 0
@@ -510,6 +512,7 @@ pub fn get_sessions_for_frontend(
                 total_tokens: row.get::<_, i64>(9)? as u64,
                 duration_ms: row.get::<_, i64>(10)? as u64,
                 is_subagent,
+                summary: row.get::<_, Option<String>>(11)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -540,7 +543,8 @@ pub fn get_sessions_for_frontend_filtered(
             COALESCE(m.total_turns, 0) as total_turns,
             COALESCE(m.total_cost, 0.0) as total_cost,
             COALESCE(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write, 0) as total_tokens,
-            COALESCE(m.total_duration_ms, 0) as duration_ms
+            COALESCE(m.total_duration_ms, 0) as duration_ms,
+            (SELECT SUBSTR(t.user_message, 1, 200) FROM turns t WHERE t.session_id = s.session_id AND t.user_message IS NOT NULL AND t.user_message != '' ORDER BY t.turn_number ASC LIMIT 1) as summary
         FROM sessions s
         LEFT JOIN session_metrics m ON s.session_id = m.session_id
         WHERE COALESCE(m.total_turns, 0) > 0
@@ -581,6 +585,7 @@ pub fn get_sessions_for_frontend_filtered(
                     total_tokens: row.get::<_, i64>(9)? as u64,
                     duration_ms: row.get::<_, i64>(10)? as u64,
                     is_subagent,
+                    summary: row.get::<_, Option<String>>(11)?,
                 })
             })?.collect::<Result<Vec<_>, _>>()?
         }
@@ -601,6 +606,7 @@ pub fn get_sessions_for_frontend_filtered(
                     total_tokens: row.get::<_, i64>(9)? as u64,
                     duration_ms: row.get::<_, i64>(10)? as u64,
                     is_subagent,
+                    summary: row.get::<_, Option<String>>(11)?,
                 })
             })?.collect::<Result<Vec<_>, _>>()?
         }
@@ -621,6 +627,7 @@ pub fn get_sessions_for_frontend_filtered(
                     total_tokens: row.get::<_, i64>(9)? as u64,
                     duration_ms: row.get::<_, i64>(10)? as u64,
                     is_subagent,
+                    summary: row.get::<_, Option<String>>(11)?,
                 })
             })?.collect::<Result<Vec<_>, _>>()?
         }
@@ -641,6 +648,7 @@ pub fn get_sessions_for_frontend_filtered(
                     total_tokens: row.get::<_, i64>(9)? as u64,
                     duration_ms: row.get::<_, i64>(10)? as u64,
                     is_subagent,
+                    summary: row.get::<_, Option<String>>(11)?,
                 })
             })?.collect::<Result<Vec<_>, _>>()?
         }
@@ -668,7 +676,8 @@ pub fn get_sessions_for_frontend_by_project(
             COALESCE(m.total_turns, 0) as total_turns,
             COALESCE(m.total_cost, 0.0) as total_cost,
             COALESCE(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write, 0) as total_tokens,
-            COALESCE(m.total_duration_ms, 0) as duration_ms
+            COALESCE(m.total_duration_ms, 0) as duration_ms,
+            (SELECT SUBSTR(t.user_message, 1, 200) FROM turns t WHERE t.session_id = s.session_id AND t.user_message IS NOT NULL AND t.user_message != '' ORDER BY t.turn_number ASC LIMIT 1) as summary
         FROM sessions s
         LEFT JOIN session_metrics m ON s.session_id = m.session_id
         WHERE s.project_path = ?1
@@ -694,6 +703,7 @@ pub fn get_sessions_for_frontend_by_project(
                 total_tokens: row.get::<_, i64>(9)? as u64,
                 duration_ms: row.get::<_, i64>(10)? as u64,
                 is_subagent,
+                summary: row.get::<_, Option<String>>(11)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;

@@ -280,6 +280,7 @@ mod tests {
             duration_ms: 3600000,
             is_subagent: false,
             file_path: "/path/to/session.jsonl".to_string(),
+            summary: None,
         };
 
         let exportable: ExportableSession = (&summary).into();

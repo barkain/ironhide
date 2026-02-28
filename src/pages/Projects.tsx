@@ -40,6 +40,17 @@ function getProjectColor(name: string): string {
   return `hsl(${hue}, 65%, 55%)`;
 }
 
+function getProjectStatus(lastActivity: string): { label: string; color: string } {
+  const now = new Date();
+  const last = new Date(lastActivity);
+  const daysSince = (now.getTime() - last.getTime()) / (1000 * 60 * 60 * 24);
+
+  if (daysSince < 1) return { label: 'Active', color: 'text-emerald-400' };
+  if (daysSince < 7) return { label: 'Recent', color: 'text-blue-400' };
+  if (daysSince < 30) return { label: 'Idle', color: 'text-amber-400' };
+  return { label: 'Dormant', color: 'text-gray-500' };
+}
+
 function Projects() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('cost');
@@ -204,6 +215,7 @@ interface ProjectCardProps {
 function ProjectCard({ project }: ProjectCardProps) {
   const displayName = getProjectDisplayName(project.project_path);
   const color = getProjectColor(displayName);
+  const status = getProjectStatus(project.last_activity);
 
   return (
     <Link to={`/sessions/project/${encodeURIComponent(project.project_path)}`}>
@@ -223,7 +235,10 @@ function ProjectCard({ project }: ProjectCardProps) {
                 <p className="text-xs text-gray-500 truncate">{project.project_path}</p>
               </div>
             </div>
-            <ChevronRight className="h-5 w-5 shrink-0 text-gray-600 mt-1" />
+            <div className="flex items-center gap-2 shrink-0 mt-1">
+              <span className={`text-xs font-medium ${status.color}`}>{status.label}</span>
+              <ChevronRight className="h-5 w-5 text-gray-600" />
+            </div>
           </div>
 
           {/* Metrics grid */}

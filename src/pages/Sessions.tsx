@@ -76,7 +76,8 @@ function Sessions() {
       (session) =>
         session.project_path.toLowerCase().includes(searchQuery.toLowerCase()) ||
         session.project_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (session.model && session.model.toLowerCase().includes(searchQuery.toLowerCase()))
+        (session.model && session.model.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (session.summary && session.summary.toLowerCase().includes(searchQuery.toLowerCase()))
     );
 
     // Sort
@@ -361,6 +362,11 @@ function SessionCard({ session, isSelected, onToggleSelect, canSelect }: Session
               <p className="mt-1 text-sm text-gray-500 truncate max-w-md">
                 {session.project_path}
               </p>
+              {session.summary && (
+                <p className="mt-1 text-sm text-[var(--color-text-tertiary)] truncate">
+                  {session.summary}
+                </p>
+              )}
             </div>
 
             <div className="flex items-center gap-6 text-sm ml-4">
