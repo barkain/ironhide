@@ -461,6 +461,13 @@ fn normalize_mtime(ts: &str) -> String {
         }
     }
 
+    // If no fractional seconds, add .000000 for canonical form
+    if result.find('.').is_none() {
+        if let Some(z_pos) = result.rfind('Z') {
+            result.insert_str(z_pos, ".000000");
+        }
+    }
+
     result
 }
 
@@ -667,7 +674,6 @@ fn get_session_turns(session_id: &str) -> Result<(Vec<CompletedTurn>, SessionFil
 /// Returns:
 /// - `needs_db_store = true` if the session was parsed and should be stored to DB
 /// - `needs_db_store = false` if data came from cache
-#[allow(dead_code)]
 fn get_session_turns_with_db_cache(
     session_id: &str,
     state: &AppState,
@@ -3145,6 +3151,7 @@ pub async fn detect_antipatterns(
 /// Also returns a baseline from the prior 30-day window for comparison.
 #[tauri::command]
 pub async fn get_developer_metrics(
+    state: tauri::State<'_, AppState>,
     days: Option<u32>,
 ) -> Result<DeveloperPerformanceResponse, CommandError> {
     use crate::metrics::developer::{calculate_developer_metrics, SessionInput};
@@ -3192,7 +3199,7 @@ pub async fn get_developer_metrics(
         }
 
         // Get detailed metrics for this session
-        let (turns, _) = match get_session_turns(&file_info.session_id) {
+        let (turns, _file_info, _needs_db_store) = match get_session_turns_with_db_cache(&file_info.session_id, &state) {
             Ok(t) => t,
             Err(_) => continue,
         };
@@ -3561,10 +3568,15 @@ mod tests {
             normalize_mtime("2026-02-19T09:57:33.939683Z"),
             "2026-02-19T09:57:33.939683Z"
         );
-        // No fractional seconds
+        // No fractional seconds → canonical form with .000000
         assert_eq!(
             normalize_mtime("2026-02-19T09:57:33+00:00"),
-            "2026-02-19T09:57:33Z"
+            "2026-02-19T09:57:33.000000Z"
+        );
+        // No fractional seconds with Z suffix
+        assert_eq!(
+            normalize_mtime("2026-02-19T09:57:33Z"),
+            "2026-02-19T09:57:33.000000Z"
         );
     }
 
@@ -3594,6 +3606,11 @@ mod tests {
         assert!(!mtime_matches(
             "2026-02-19T09:57:33.939683Z",
             "2026-02-19T09:57:33.939684Z"
+        ));
+        // No fractional seconds vs microsecond precision
+        assert!(mtime_matches(
+            "2026-02-19T09:57:33Z",
+            "2026-02-19T09:57:33.000000Z"
         ));
     }
 }

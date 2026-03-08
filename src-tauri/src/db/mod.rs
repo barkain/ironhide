@@ -79,7 +79,12 @@ impl Database {
         // so it can be shown in the session list without querying the turns table).
         // ALTER TABLE ADD COLUMN is idempotent-safe: we ignore the error if the column
         // already exists (SQLite returns "duplicate column name" in that case).
-        let _ = conn.execute_batch("ALTER TABLE sessions ADD COLUMN summary TEXT;");
+        if let Err(e) = conn.execute_batch("ALTER TABLE sessions ADD COLUMN summary TEXT;") {
+            let msg = e.to_string();
+            if !msg.contains("duplicate column") {
+                return Err(DbError::Migration(format!("Failed to add summary column: {}", msg)));
+            }
+        }
 
         // Migration: Normalize file_mtime format for consistent cache-hit comparison.
         //

@@ -489,8 +489,8 @@ pub fn get_sessions_for_frontend(
             COALESCE(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write, 0) as total_tokens,
             COALESCE(m.total_duration_ms, 0) as duration_ms,
             COALESCE(
-                (SELECT SUBSTR(t.user_message, 1, 200) FROM turns t WHERE t.session_id = s.session_id AND t.user_message IS NOT NULL AND t.user_message != '' ORDER BY t.turn_number ASC LIMIT 1),
-                s.summary
+                s.summary,
+                (SELECT SUBSTR(t.user_message, 1, 200) FROM turns t WHERE t.session_id = s.session_id AND t.user_message IS NOT NULL AND t.user_message != '' ORDER BY t.turn_number ASC LIMIT 1)
             ) as summary
         FROM sessions s
         LEFT JOIN session_metrics m ON s.session_id = m.session_id
@@ -550,8 +550,8 @@ pub fn get_sessions_for_frontend_filtered(
             COALESCE(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write, 0) as total_tokens,
             COALESCE(m.total_duration_ms, 0) as duration_ms,
             COALESCE(
-                (SELECT SUBSTR(t.user_message, 1, 200) FROM turns t WHERE t.session_id = s.session_id AND t.user_message IS NOT NULL AND t.user_message != '' ORDER BY t.turn_number ASC LIMIT 1),
-                s.summary
+                s.summary,
+                (SELECT SUBSTR(t.user_message, 1, 200) FROM turns t WHERE t.session_id = s.session_id AND t.user_message IS NOT NULL AND t.user_message != '' ORDER BY t.turn_number ASC LIMIT 1)
             ) as summary
         FROM sessions s
         LEFT JOIN session_metrics m ON s.session_id = m.session_id
@@ -686,8 +686,8 @@ pub fn get_sessions_for_frontend_by_project(
             COALESCE(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write, 0) as total_tokens,
             COALESCE(m.total_duration_ms, 0) as duration_ms,
             COALESCE(
-                (SELECT SUBSTR(t.user_message, 1, 200) FROM turns t WHERE t.session_id = s.session_id AND t.user_message IS NOT NULL AND t.user_message != '' ORDER BY t.turn_number ASC LIMIT 1),
-                s.summary
+                s.summary,
+                (SELECT SUBSTR(t.user_message, 1, 200) FROM turns t WHERE t.session_id = s.session_id AND t.user_message IS NOT NULL AND t.user_message != '' ORDER BY t.turn_number ASC LIMIT 1)
             ) as summary
         FROM sessions s
         LEFT JOIN session_metrics m ON s.session_id = m.session_id

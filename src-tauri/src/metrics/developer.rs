@@ -128,7 +128,7 @@ fn compute_axes(sessions: &[SessionInput]) -> DeveloperPerformanceMetrics {
         let total_tools: u32 = sessions.iter().map(|s| s.tool_count).sum();
         let total_errors: u32 = sessions.iter().map(|s| s.error_tool_count).sum();
         if total_tools > 0 {
-            (1.0 - total_errors as f64 / total_tools as f64) * 10.0
+            ((1.0 - total_errors as f64 / total_tools as f64) * 10.0).clamp(0.0, 10.0)
         } else {
             10.0
         }
@@ -163,7 +163,7 @@ fn compute_axes(sessions: &[SessionInput]) -> DeveloperPerformanceMetrics {
     let scope_discipline = {
         let mut turn_counts: Vec<u32> = sessions.iter().map(|s| s.turn_count).collect();
         turn_counts.sort_unstable();
-        let p75_idx = (turn_counts.len() as f64 * 0.75).ceil() as usize;
+        let p75_idx = (turn_counts.len() as f64 * 0.75).floor() as usize;
         let p75_value = turn_counts[p75_idx.min(turn_counts.len() - 1)];
         let within_p75 = sessions
             .iter()
