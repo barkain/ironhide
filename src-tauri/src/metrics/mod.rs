@@ -10,6 +10,7 @@ pub mod tokens;
 pub mod cost;
 pub mod efficiency;
 pub mod session;
+pub mod developer;
 
 use thiserror::Error;
 

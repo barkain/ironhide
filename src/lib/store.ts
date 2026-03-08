@@ -39,6 +39,12 @@ interface AppState {
   toggleSessionComparison: (sessionId: string) => void;
   clearComparison: () => void;
   setSelectedForComparison: (sessionIds: string[]) => void;
+
+  // View modes
+  projectsViewMode: 'grid' | 'list';
+  setProjectsViewMode: (mode: 'grid' | 'list') => void;
+  sessionsViewMode: 'cards' | 'list';
+  setSessionsViewMode: (mode: 'cards' | 'list') => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -94,6 +100,12 @@ export const useAppStore = create<AppState>()(
       clearComparison: () => set({ selectedForComparison: [] }),
       setSelectedForComparison: (sessionIds) =>
         set({ selectedForComparison: sessionIds.slice(0, MAX_COMPARISON_SESSIONS) }),
+
+      // View modes
+      projectsViewMode: 'grid',
+      setProjectsViewMode: (mode) => set({ projectsViewMode: mode }),
+      sessionsViewMode: 'cards',
+      setSessionsViewMode: (mode) => set({ sessionsViewMode: mode }),
     }),
     {
       name: 'ironhide-storage',
@@ -104,6 +116,8 @@ export const useAppStore = create<AppState>()(
         selectedProject: state.selectedProject,
         theme: state.theme,
         selectedForComparison: state.selectedForComparison,
+        projectsViewMode: state.projectsViewMode,
+        sessionsViewMode: state.sessionsViewMode,
       }),
     }
   )

@@ -75,6 +75,26 @@ impl Database {
             );
         "#)?;
 
+        // Migration: Add summary column to sessions table (stores the first user message
+        // so it can be shown in the session list without querying the turns table).
+        // ALTER TABLE ADD COLUMN is idempotent-safe: we ignore the error if the column
+        // already exists (SQLite returns "duplicate column name" in that case).
+        let _ = conn.execute_batch("ALTER TABLE sessions ADD COLUMN summary TEXT;");
+
+        // Migration: Normalize file_mtime format for consistent cache-hit comparison.
+        //
+        // get_file_mtime() now uses to_rfc3339_opts(Micros, true) which produces
+        // timestamps like "2026-02-20T11:44:48.663732Z" (6 fractional digits, Z suffix).
+        //
+        // Some older DB records use "+00:00" suffix instead of "Z". This migration
+        // normalizes those so the string comparison in the cache-hit check succeeds.
+        conn.execute_batch(r#"
+            UPDATE sessions
+            SET file_mtime = replace(file_mtime, '+00:00', 'Z')
+            WHERE file_mtime IS NOT NULL
+              AND file_mtime LIKE '%+00:00';
+        "#)?;
+
         Ok(())
     }
 

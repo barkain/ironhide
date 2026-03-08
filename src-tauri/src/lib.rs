@@ -147,6 +147,8 @@ pub fn run() {
             commands::get_recommendations,
             // Anti-pattern detection commands
             commands::detect_antipatterns,
+            // Developer performance commands
+            commands::get_developer_metrics,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

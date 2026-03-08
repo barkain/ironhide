@@ -3,6 +3,7 @@ import {
   getDashboardSummary,
   getDailyMetrics,
   getProjectMetrics,
+  getDeveloperMetrics,
   refreshData,
 } from '../lib/tauri';
 import { useAppStore, type PresetRange } from '../lib/store';
@@ -10,6 +11,7 @@ import type {
   DashboardSummary,
   DailyMetrics,
   ProjectMetrics,
+  DeveloperPerformanceMetrics,
 } from '../types';
 
 /** Convert a preset range label to the number of days for backend filtering */
@@ -82,6 +84,21 @@ export function useProjectMetrics() {
   return useQuery<ProjectMetrics[]>({
     queryKey: ['projectMetrics', days],
     queryFn: () => getProjectMetrics(days),
+    staleTime: METRICS_STALE_TIME,
+    gcTime: METRICS_GC_TIME,
+    placeholderData: keepPreviousData,
+  });
+}
+
+// ============================================================================
+// Developer Performance
+// ============================================================================
+
+/** Fetch developer performance metrics (7-axis spider chart) */
+export function useDeveloperMetrics(days?: number) {
+  return useQuery<DeveloperPerformanceMetrics>({
+    queryKey: ['developerMetrics', days],
+    queryFn: () => getDeveloperMetrics(days),
     staleTime: METRICS_STALE_TIME,
     gcTime: METRICS_GC_TIME,
     placeholderData: keepPreviousData,

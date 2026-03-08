@@ -5,7 +5,7 @@
   "identifier": "com.ironhide.desktop",
   "build": {
     "beforeDevCommand": "bun run dev",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "rm -f src-tauri/target/release/bundle/macos/*.dmg && bun run build",
     "frontendDist": "../dist"
   },

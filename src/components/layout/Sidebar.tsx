@@ -9,6 +9,7 @@ import {
   GitCompare,
   TrendingUp,
   CalendarRange,
+  Radar,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAppStore } from '../../lib/store';
@@ -28,6 +29,7 @@ export function Sidebar() {
     { to: '/sessions', icon: FolderOpen, label: 'Projects' },
     { to: '/timeline', icon: CalendarRange, label: 'Timeline' },
     { to: '/trends', icon: TrendingUp, label: 'Trends' },
+    { to: '/performance', icon: Radar, label: 'Performance' },
     {
       to: selectedForComparison.length > 0
         ? `/compare/${selectedForComparison.join(',')}`

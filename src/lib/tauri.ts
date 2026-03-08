@@ -7,6 +7,7 @@ import type {
   DashboardSummary,
   DailyMetrics,
   ProjectMetrics,
+  DeveloperPerformanceMetrics,
 } from '../types';
 
 // ============================================================================
@@ -88,6 +89,15 @@ export async function getDailyMetrics(days?: number): Promise<DailyMetrics[]> {
 export async function getProjectMetrics(days?: number): Promise<ProjectMetrics[]> {
   // Pass days to backend for time-range filtering (undefined = all time)
   return invoke('get_project_metrics', { days: days ?? null });
+}
+
+// ============================================================================
+// Developer Performance Commands
+// ============================================================================
+
+/** Get developer performance metrics (7-axis spider chart) */
+export async function getDeveloperMetrics(days?: number): Promise<DeveloperPerformanceMetrics> {
+  return invoke('get_developer_metrics', { days: days ?? null });
 }
 
 // ============================================================================

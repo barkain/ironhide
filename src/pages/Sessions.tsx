@@ -31,6 +31,8 @@ import {
   X,
   ArrowLeft,
   FolderOpen,
+  LayoutGrid,
+  List,
 } from 'lucide-react';
 import type { SessionSummary } from '../types';
 
@@ -51,7 +53,7 @@ function Sessions() {
 
   const { data: sessions, isLoading } = useSessionsByProject(projectPath);
   const { data: projectMetrics } = useProjectMetrics();
-  const { selectedForComparison, toggleSessionComparison, clearComparison } = useAppStore();
+  const { selectedForComparison, toggleSessionComparison, clearComparison, sessionsViewMode, setSessionsViewMode } = useAppStore();
 
   const canCompare = selectedForComparison.length >= 2;
   const maxSelected = selectedForComparison.length >= 3;
@@ -241,6 +243,28 @@ function Sessions() {
               <SortButton field="cost" label="Cost" />
               <SortButton field="tokens" label="Tokens" />
               <SortButton field="turns" label="Turns" />
+              <div className="flex items-center gap-1 ml-4 border-l border-[var(--color-border)] pl-4">
+                <button
+                  onClick={() => setSessionsViewMode('cards')}
+                  className={`p-1.5 rounded-md transition-colors ${
+                    sessionsViewMode === 'cards'
+                      ? 'bg-[var(--color-primary-600)]/20 text-[var(--color-primary-400)]'
+                      : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                  }`}
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => setSessionsViewMode('list')}
+                  className={`p-1.5 rounded-md transition-colors ${
+                    sessionsViewMode === 'list'
+                      ? 'bg-[var(--color-primary-600)]/20 text-[var(--color-primary-400)]'
+                      : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                  }`}
+                >
+                  <List className="h-4 w-4" />
+                </button>
+              </div>
             </div>
             <ExportButton
               sessionIds={
@@ -284,10 +308,22 @@ function Sessions() {
               </p>
             </CardContent>
           </Card>
-        ) : (
+        ) : sessionsViewMode === 'cards' ? (
           <div className="space-y-3">
             {filteredSessions.map((session) => (
               <SessionCard
+                key={session.id}
+                session={session}
+                isSelected={selectedForComparison.includes(session.id)}
+                onToggleSelect={() => toggleSessionComparison(session.id)}
+                canSelect={!maxSelected}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {filteredSessions.map((session) => (
+              <SessionListRow
                 key={session.id}
                 session={session}
                 isSelected={selectedForComparison.includes(session.id)}
@@ -353,20 +389,17 @@ function SessionCard({ session, isSelected, onToggleSelect, canSelect }: Session
 
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3">
-                <h3 className="font-medium text-white truncate" title={session.project_path}>
-                  {getProjectDisplayName(session.project_path)}
+                <h3 className="font-medium text-[var(--color-text-primary)] truncate" title={session.summary || session.id}>
+                  {session.summary
+                    ? (session.summary.length > 80 ? session.summary.substring(0, 80) + '...' : session.summary)
+                    : `Session ${session.id.substring(0, 8)}...`}
                 </h3>
                 {session.model && <Badge variant="info">{session.model}</Badge>}
                 {session.is_subagent && <Badge variant="warning">Subagent</Badge>}
               </div>
-              <p className="mt-1 text-sm text-gray-500 truncate max-w-md">
-                {session.project_path}
+              <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
+                {session.id.substring(0, 12)} · {formatRelativeTime(session.started_at)}
               </p>
-              {session.summary && (
-                <p className="mt-1 text-sm text-[var(--color-text-tertiary)] truncate">
-                  {session.summary}
-                </p>
-              )}
             </div>
 
             <div className="flex items-center gap-6 text-sm ml-4">
@@ -395,6 +428,49 @@ function SessionCard({ session, isSelected, onToggleSelect, canSelect }: Session
         </Card>
       </Link>
     </div>
+  );
+}
+
+function SessionListRow({ session, isSelected, onToggleSelect, canSelect }: SessionCardProps) {
+  const handleCheckboxClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (canSelect || isSelected) onToggleSelect();
+  };
+
+  return (
+    <Link to={`/sessions/${session.id}`}>
+      <div className={cn(
+        "flex items-center gap-3 px-4 py-2.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] transition-colors hover:bg-gray-800/50",
+        isSelected && "ring-2 ring-[var(--color-primary-500)] bg-[var(--color-primary-600)]/5"
+      )}>
+        <button onClick={handleCheckboxClick} className={cn(
+          "flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-all",
+          isSelected ? "border-[var(--color-primary-500)] bg-[var(--color-primary-500)] text-white"
+            : canSelect ? "border-gray-600 hover:border-[var(--color-primary-400)]"
+            : "border-gray-700 opacity-50"
+        )}>
+          {isSelected && <Check className="h-2.5 w-2.5" />}
+        </button>
+        <div className="min-w-0 flex-1">
+          <span className="text-sm text-[var(--color-text-primary)] truncate block">
+            {session.summary
+              ? (session.summary.length > 60 ? session.summary.substring(0, 60) + '...' : session.summary)
+              : `Session ${session.id.substring(0, 8)}...`}
+          </span>
+        </div>
+        {session.model && <Badge variant="info">{session.model}</Badge>}
+        {session.is_subagent && <Badge variant="warning">Sub</Badge>}
+        <div className="flex items-center gap-5 text-xs text-gray-400 shrink-0">
+          <span>{formatNumber(session.total_turns)} turns</span>
+          <span>{formatCompactNumber(session.total_tokens)}</span>
+          <span>{formatCurrency(session.total_cost)}</span>
+          <span>{formatDuration(session.duration_ms / 1000)}</span>
+          <span className="text-gray-500 min-w-[72px] text-right">{formatRelativeTime(session.started_at)}</span>
+        </div>
+        <ChevronRight className="h-4 w-4 text-gray-600 shrink-0" />
+      </div>
+    </Link>
   );
 }
 
