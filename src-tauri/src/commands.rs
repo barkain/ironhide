@@ -674,6 +674,7 @@ fn get_session_turns(session_id: &str) -> Result<(Vec<CompletedTurn>, SessionFil
 /// Returns:
 /// - `needs_db_store = true` if the session was parsed and should be stored to DB
 /// - `needs_db_store = false` if data came from cache
+#[allow(dead_code)]
 fn get_session_turns_with_db_cache(
     session_id: &str,
     state: &AppState,
@@ -3149,9 +3150,31 @@ pub async fn detect_antipatterns(
 ///   Cost Efficiency, Cache Utilization, Scope Discipline, Parallel Throughput
 ///
 /// Also returns a baseline from the prior 30-day window for comparison.
+///
+/// Heavy session parsing is offloaded to a blocking thread via `spawn_blocking`
+/// to avoid freezing the Tokio runtime (and thus the UI).
 #[tauri::command]
 pub async fn get_developer_metrics(
-    state: tauri::State<'_, AppState>,
+    _state: tauri::State<'_, AppState>,
+    days: Option<u32>,
+) -> Result<DeveloperPerformanceResponse, CommandError> {
+    // Offload all heavy synchronous work (session iteration, JSONL parsing,
+    // metrics computation) to a blocking thread so the async runtime stays
+    // responsive and the UI does not freeze.
+    tokio::task::spawn_blocking(move || {
+        compute_developer_metrics_sync(days)
+    })
+    .await
+    .map_err(|e| CommandError::Internal(format!("Task join error: {}", e)))?
+}
+
+/// Synchronous implementation of developer metrics computation.
+///
+/// Separated from the async command so it can run inside `spawn_blocking`.
+/// Uses `get_session_turns` (in-memory cache + JSONL fallback) instead of
+/// `get_session_turns_with_db_cache` to avoid needing `&AppState` across
+/// the thread boundary.
+fn compute_developer_metrics_sync(
     days: Option<u32>,
 ) -> Result<DeveloperPerformanceResponse, CommandError> {
     use crate::metrics::developer::{calculate_developer_metrics, SessionInput};
@@ -3198,8 +3221,11 @@ pub async fn get_developer_metrics(
             continue;
         }
 
-        // Get detailed metrics for this session
-        let (turns, _file_info, _needs_db_store) = match get_session_turns_with_db_cache(&file_info.session_id, &state) {
+        // Get detailed metrics for this session using in-memory cache + JSONL fallback.
+        // We use get_session_turns (no DB cache) because AppState is not available
+        // on this blocking thread, and the in-memory cache is typically warm after
+        // preload_all_sessions runs at startup.
+        let (turns, _file_info) = match get_session_turns(&file_info.session_id) {
             Ok(t) => t,
             Err(_) => continue,
         };

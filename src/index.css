@@ -19,9 +19,9 @@
   /* These are overridden by the light/dark rules below, but Tailwind
      needs them declared in @theme so utilities like bg-[var(--color-surface)]
      keep working. The actual runtime values come from the :root / html.dark rules. */
-  --color-background: #0f0f10;
-  --color-surface: #1a1a1c;
-  --color-border: #2a2a2e;
+  --color-background: #0f1729;
+  --color-surface: #1a2332;
+  --color-border: #2a3a4e;
 }
 
 /* ---- Light / Dark theme colour tokens ---- */
@@ -43,17 +43,17 @@
 
 /* Dark mode */
 html.dark {
-  --color-background: #0f0f10;
-  --color-surface: #1a1a1c;
-  --color-border: #2a2a2e;
+  --color-background: #0f1729;
+  --color-surface: #1a2332;
+  --color-border: #2a3a4e;
   --color-text-primary: #f3f4f6;
   --color-text-secondary: #9ca3af;
   --color-text-tertiary: #6b7280;
   --color-text-muted: #4b5563;
-  --color-surface-hover: #374151;
-  --color-surface-alt: #374151;
-  --color-scrollbar-thumb: #374151;
-  --color-scrollbar-thumb-hover: #4b5563;
+  --color-surface-hover: #243044;
+  --color-surface-alt: #243044;
+  --color-scrollbar-thumb: #243044;
+  --color-scrollbar-thumb-hover: #2a3a4e;
 }
 
 /* Base styles */

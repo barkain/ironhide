@@ -26,10 +26,10 @@ export function Sidebar() {
 
   const navItems: NavItem[] = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+    { to: '/performance', icon: Radar, label: 'Performance' },
     { to: '/sessions', icon: FolderOpen, label: 'Projects' },
     { to: '/timeline', icon: CalendarRange, label: 'Timeline' },
     { to: '/trends', icon: TrendingUp, label: 'Trends' },
-    { to: '/performance', icon: Radar, label: 'Performance' },
     {
       to: selectedForComparison.length > 0
         ? `/compare/${selectedForComparison.join(',')}`

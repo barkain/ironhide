@@ -1,22 +1,15 @@
 import { useState, useMemo } from 'react';
 import { Header } from '../components/layout/Header';
-import { Card, CardContent } from '../components/ui/Card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/Card';
 import { DeveloperRadarChart } from '../components/charts/DeveloperRadarChart';
 import { useDeveloperMetrics } from '../hooks/useMetrics';
 import {
   Calendar,
   Zap,
-  Shield,
-  Workflow,
-  DollarSign,
-  Database,
   Target,
-  Layers,
   TrendingUp,
   TrendingDown,
 } from 'lucide-react';
-import type { DeveloperPerformanceMetrics } from '../types';
-
 type TimeRange = '30d' | '60d' | '90d';
 
 const ARCHETYPE_STYLES: Record<string, { color: string; bg: string; description: string }> = {
@@ -52,15 +45,48 @@ const ARCHETYPE_STYLES: Record<string, { color: string; bg: string; description:
   },
 };
 
-const AXIS_CONFIG = [
-  { key: 'session_velocity' as const, label: 'Session Velocity', icon: Zap, description: 'Deliverable units per session hour' },
-  { key: 'tool_reliability' as const, label: 'Tool Reliability', icon: Shield, description: 'Success rate of tool invocations' },
-  { key: 'workflow_efficiency' as const, label: 'Workflow Efficiency', icon: Workflow, description: 'Low rework and clarification friction' },
-  { key: 'cost_efficiency' as const, label: 'Cost Efficiency', icon: DollarSign, description: 'Output per dollar spent' },
-  { key: 'cache_utilization' as const, label: 'Cache Utilization', icon: Database, description: 'Context reuse through cache reads' },
-  { key: 'scope_discipline' as const, label: 'Scope Discipline', icon: Target, description: 'Sessions within typical turn count' },
-  { key: 'parallel_throughput' as const, label: 'Parallel Throughput', icon: Layers, description: 'Concurrent sessions per day' },
+const METRICS_LIST = [
+  { key: 'session_velocity' as const, label: 'Session Velocity', tooltip: 'Measures deliverable units produced per hour of session time. Normalized to 0-10 scale.' },
+  { key: 'tool_reliability' as const, label: 'Tool Reliability', tooltip: 'Percentage of tool calls that succeed without errors. Score of 10 = zero errors.' },
+  { key: 'workflow_efficiency' as const, label: 'Workflow Efficiency', tooltip: 'How smoothly sessions flow without rework or clarification cycles.' },
+  { key: 'cost_efficiency' as const, label: 'Cost Efficiency', tooltip: 'Output per dollar of API cost. Score of 10 = $1 or less per deliverable unit.' },
+  { key: 'cache_utilization' as const, label: 'Cache Utilization', tooltip: 'Cache read efficiency. Higher = better context reuse, less redundant processing.' },
+  { key: 'scope_discipline' as const, label: 'Scope Discipline', tooltip: 'Sessions within P75 turn count. Higher = focused execution.' },
+  { key: 'parallel_throughput' as const, label: 'Parallel Throughput', tooltip: 'Average concurrent sessions per active day.' },
 ];
+
+function MetricRow({ label, value, baseline, tooltip }: { label: string; value: number; baseline: number | null; tooltip: string }) {
+  const delta = baseline !== null ? value - baseline : null;
+  const pct = (value / 10) * 100;
+  const dotColor = value >= 8 ? 'bg-green-400' : value >= 5 ? 'bg-blue-400' : value >= 3 ? 'bg-yellow-400' : 'bg-red-400';
+
+  return (
+    <div className="group relative">
+      <div className="flex items-center gap-3">
+        <div className={`h-2.5 w-2.5 rounded-full ${dotColor} shrink-0`} />
+        <span className="text-sm text-[var(--color-text-secondary)] w-32 truncate">{label}</span>
+        <div className="flex-1 h-1.5 rounded-full bg-[var(--color-background)] overflow-hidden">
+          <div
+            className={`h-full rounded-full ${dotColor} transition-all duration-700`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <span className="text-sm font-semibold text-[var(--color-text-primary)] w-10 text-right tabular-nums">
+          {value.toFixed(1)}
+        </span>
+        {delta !== null && (
+          <span className={`text-xs w-12 text-right ${delta >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            {delta >= 0 ? '+' : ''}{delta.toFixed(1)}
+          </span>
+        )}
+      </div>
+      {/* Hover tooltip */}
+      <div className="absolute bottom-full left-8 mb-2 w-64 rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] p-3 text-xs text-fuchsia-300 leading-relaxed shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 pointer-events-none">
+        {tooltip}
+      </div>
+    </div>
+  );
+}
 
 function Performance() {
   const [timeRange, setTimeRange] = useState<TimeRange>('90d');
@@ -118,26 +144,45 @@ function Performance() {
           </div>
         )}
 
-        {/* Radar Chart */}
-        <DeveloperRadarChart
-          metrics={metrics ?? emptyMetrics}
-          isLoading={isLoading}
-        />
+        {/* Integrated Performance Panel */}
+        {metrics && !isLoading ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Performance Profile</CardTitle>
+              <CardDescription>7-axis developer performance ({metrics.session_count} sessions analyzed)</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-center">
+                {/* Spider Chart - left side */}
+                <div className="h-[400px]">
+                  <DeveloperRadarChart metrics={metrics} />
+                </div>
 
-        {/* Axis Breakdown Cards */}
-        {metrics && !isLoading && (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {AXIS_CONFIG.map((axis) => (
-              <AxisCard
-                key={axis.key}
-                label={axis.label}
-                icon={axis.icon}
-                description={axis.description}
-                value={metrics[axis.key]}
-                baseline={metrics.baseline ? metrics.baseline[axis.key] : null}
-              />
-            ))}
-          </div>
+                {/* Metric List - right side */}
+                <div className="space-y-4">
+                  {METRICS_LIST.map((m) => (
+                    <MetricRow
+                      key={m.key}
+                      label={m.label}
+                      value={metrics[m.key]}
+                      baseline={metrics.baseline?.[m.key] ?? null}
+                      tooltip={m.tooltip}
+                    />
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardHeader>
+              <CardTitle>Performance Profile</CardTitle>
+              <CardDescription>7-axis developer performance spider chart</CardDescription>
+            </CardHeader>
+            <CardContent className="flex h-80 items-center justify-center">
+              <div className="animate-pulse text-gray-500">Loading...</div>
+            </CardContent>
+          </Card>
         )}
       </div>
     </div>
@@ -189,73 +234,5 @@ function OverallScoreCard({ score, baseline }: { score: number; baseline: number
     </Card>
   );
 }
-
-interface AxisCardProps {
-  label: string;
-  icon: React.ElementType;
-  description: string;
-  value: number;
-  baseline: number | null;
-}
-
-function AxisCard({ label, icon: Icon, description, value, baseline }: AxisCardProps) {
-  const delta = baseline !== null ? value - baseline : null;
-  const pct = (value / 10) * 100;
-
-  const barColor =
-    value >= 8 ? 'bg-green-500' :
-    value >= 5 ? 'bg-blue-500' :
-    value >= 3 ? 'bg-yellow-500' :
-    'bg-red-500';
-
-  return (
-    <Card>
-      <CardContent className="space-y-3">
-        <div className="flex items-center gap-3">
-          <Icon className="h-5 w-5 text-gray-400 shrink-0" />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{label}</p>
-            <p className="text-xs text-gray-500 truncate">{description}</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="flex-1">
-            <div className="h-2 rounded-full bg-[var(--color-background)] overflow-hidden">
-              <div
-                className={`h-full rounded-full ${barColor} transition-all duration-500`}
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-          </div>
-          <span className="text-sm font-semibold text-[var(--color-text-primary)] w-10 text-right">
-            {value.toFixed(1)}
-          </span>
-        </div>
-
-        {delta !== null && (
-          <div className={`flex items-center text-xs ${delta >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-            {delta >= 0 ? <TrendingUp className="mr-1 h-3 w-3" /> : <TrendingDown className="mr-1 h-3 w-3" />}
-            {delta >= 0 ? '+' : ''}{delta.toFixed(1)} vs baseline
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-const emptyMetrics: DeveloperPerformanceMetrics = {
-  session_velocity: 0,
-  tool_reliability: 0,
-  workflow_efficiency: 0,
-  cost_efficiency: 0,
-  cache_utilization: 0,
-  scope_discipline: 0,
-  parallel_throughput: 0,
-  archetype: 'Developing',
-  overall_score: 0,
-  session_count: 0,
-  baseline: null,
-};
 
 export default Performance;
