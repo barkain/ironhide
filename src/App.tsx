@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout } from './components/layout/Layout';
 import { PageLoadingSpinner } from './components/ui/PageLoadingSpinner';
+import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { preloadAllSessions } from './lib/tauri';
 import { useAppStore } from './lib/store';
 
@@ -15,6 +16,7 @@ const TurnDetail = React.lazy(() => import('./pages/TurnDetail'));
 const Trends = React.lazy(() => import('./pages/Trends'));
 const Compare = React.lazy(() => import('./pages/Compare'));
 const Timeline = React.lazy(() => import('./pages/Timeline'));
+const Performance = React.lazy(() => import('./pages/Performance'));
 const Settings = React.lazy(() => import('./pages/Settings'));
 
 const queryClient = new QueryClient({
@@ -62,22 +64,25 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <Suspense fallback={<PageLoadingSpinner />}>
-          <Routes>
-            <Route path="/" element={<Layout />}>
-              <Route index element={<Dashboard />} />
-              <Route path="sessions" element={<Projects />} />
-              <Route path="sessions/project/:projectPath" element={<Sessions />} />
-              <Route path="sessions/:id" element={<SessionDetail />} />
-              <Route path="sessions/:id/turns/:turnNumber" element={<TurnDetail />} />
-              <Route path="timeline" element={<Timeline />} />
-              <Route path="trends" element={<Trends />} />
-              <Route path="compare" element={<Compare />} />
-              <Route path="compare/:sessionIds" element={<Compare />} />
-              <Route path="settings" element={<Settings />} />
-            </Route>
-          </Routes>
-        </Suspense>
+        <ErrorBoundary>
+          <Suspense fallback={<PageLoadingSpinner />}>
+            <Routes>
+              <Route path="/" element={<Layout />}>
+                <Route index element={<Dashboard />} />
+                <Route path="sessions" element={<Projects />} />
+                <Route path="sessions/project/:projectPath" element={<Sessions />} />
+                <Route path="sessions/:id" element={<SessionDetail />} />
+                <Route path="sessions/:id/turns/:turnNumber" element={<TurnDetail />} />
+                <Route path="timeline" element={<Timeline />} />
+                <Route path="trends" element={<Trends />} />
+                <Route path="performance" element={<Performance />} />
+                <Route path="compare" element={<Compare />} />
+                <Route path="compare/:sessionIds" element={<Compare />} />
+                <Route path="settings" element={<Settings />} />
+              </Route>
+            </Routes>
+          </Suspense>
+        </ErrorBoundary>
       </BrowserRouter>
     </QueryClientProvider>
   );

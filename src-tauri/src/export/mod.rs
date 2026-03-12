@@ -66,6 +66,18 @@ fn default_true() -> bool {
     true
 }
 
+/// Truncate a string to at most `max_bytes` bytes, ensuring we don't split a multi-byte character.
+fn truncate_str(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 /// Exportable session record for CSV/JSON
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportableSession {
@@ -133,7 +145,7 @@ impl ExportableTurn {
             tools_used: turn.tools_used.join(", "),
             user_message_preview: turn.user_message.as_ref().map(|m| {
                 if m.len() > 100 {
-                    format!("{}...", &m[..100])
+                    format!("{}...", truncate_str(m, 100))
                 } else {
                     m.clone()
                 }

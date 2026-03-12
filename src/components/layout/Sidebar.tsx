@@ -9,6 +9,7 @@ import {
   GitCompare,
   TrendingUp,
   CalendarRange,
+  Radar,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAppStore } from '../../lib/store';
@@ -25,6 +26,7 @@ export function Sidebar() {
 
   const navItems: NavItem[] = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+    { to: '/performance', icon: Radar, label: 'Performance' },
     { to: '/sessions', icon: FolderOpen, label: 'Projects' },
     { to: '/timeline', icon: CalendarRange, label: 'Timeline' },
     { to: '/trends', icon: TrendingUp, label: 'Trends' },

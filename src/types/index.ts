@@ -184,6 +184,25 @@ export interface SubagentSummary {
 }
 
 // ============================================================================
+// Developer Performance Types
+// ============================================================================
+
+/** Developer performance metrics (7-axis spider chart, 0-10 scale) */
+export interface DeveloperPerformanceMetrics {
+  session_velocity: number;
+  tool_reliability: number;
+  workflow_efficiency: number;
+  cost_efficiency: number;
+  cache_utilization: number;
+  scope_discipline: number;
+  parallel_throughput: number;
+  archetype: string;
+  overall_score: number;
+  session_count: number;
+  baseline: DeveloperPerformanceMetrics | null;
+}
+
+// ============================================================================
 // Filter/Query Types
 // ============================================================================
 

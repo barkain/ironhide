@@ -64,6 +64,8 @@ pub struct CachedSessionData {
     pub total_duration_ms: u64,
     pub file_path: String,
     pub file_mtime: Option<String>,
+    /// First user message for this session, used as a display summary in session lists.
+    pub summary: Option<String>,
 }
 
 /// Get all sessions with optional filtering
@@ -486,7 +488,10 @@ pub fn get_sessions_for_frontend(
             COALESCE(m.total_cost, 0.0) as total_cost,
             COALESCE(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write, 0) as total_tokens,
             COALESCE(m.total_duration_ms, 0) as duration_ms,
-            (SELECT SUBSTR(t.user_message, 1, 200) FROM turns t WHERE t.session_id = s.session_id AND t.user_message IS NOT NULL AND t.user_message != '' ORDER BY t.turn_number ASC LIMIT 1) as summary
+            COALESCE(
+                s.summary,
+                (SELECT SUBSTR(t.user_message, 1, 200) FROM turns t WHERE t.session_id = s.session_id AND t.user_message IS NOT NULL AND t.user_message != '' ORDER BY t.turn_number ASC LIMIT 1)
+            ) as summary
         FROM sessions s
         LEFT JOIN session_metrics m ON s.session_id = m.session_id
         WHERE COALESCE(m.total_turns, 0) > 0
@@ -544,7 +549,10 @@ pub fn get_sessions_for_frontend_filtered(
             COALESCE(m.total_cost, 0.0) as total_cost,
             COALESCE(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write, 0) as total_tokens,
             COALESCE(m.total_duration_ms, 0) as duration_ms,
-            (SELECT SUBSTR(t.user_message, 1, 200) FROM turns t WHERE t.session_id = s.session_id AND t.user_message IS NOT NULL AND t.user_message != '' ORDER BY t.turn_number ASC LIMIT 1) as summary
+            COALESCE(
+                s.summary,
+                (SELECT SUBSTR(t.user_message, 1, 200) FROM turns t WHERE t.session_id = s.session_id AND t.user_message IS NOT NULL AND t.user_message != '' ORDER BY t.turn_number ASC LIMIT 1)
+            ) as summary
         FROM sessions s
         LEFT JOIN session_metrics m ON s.session_id = m.session_id
         WHERE COALESCE(m.total_turns, 0) > 0
@@ -677,7 +685,10 @@ pub fn get_sessions_for_frontend_by_project(
             COALESCE(m.total_cost, 0.0) as total_cost,
             COALESCE(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write, 0) as total_tokens,
             COALESCE(m.total_duration_ms, 0) as duration_ms,
-            (SELECT SUBSTR(t.user_message, 1, 200) FROM turns t WHERE t.session_id = s.session_id AND t.user_message IS NOT NULL AND t.user_message != '' ORDER BY t.turn_number ASC LIMIT 1) as summary
+            COALESCE(
+                s.summary,
+                (SELECT SUBSTR(t.user_message, 1, 200) FROM turns t WHERE t.session_id = s.session_id AND t.user_message IS NOT NULL AND t.user_message != '' ORDER BY t.turn_number ASC LIMIT 1)
+            ) as summary
         FROM sessions s
         LEFT JOIN session_metrics m ON s.session_id = m.session_id
         WHERE s.project_path = ?1
@@ -781,7 +792,8 @@ pub fn get_all_sessions_with_mtime(
             COALESCE(m.total_turns, 0) as total_turns,
             COALESCE(m.total_cost, 0.0) as total_cost,
             COALESCE(m.total_input_tokens + m.total_output_tokens + m.total_cache_read + m.total_cache_write, 0) as total_tokens,
-            COALESCE(m.total_duration_ms, 0) as total_duration_ms
+            COALESCE(m.total_duration_ms, 0) as total_duration_ms,
+            s.summary
         FROM sessions s
         LEFT JOIN session_metrics m ON s.session_id = m.session_id
         "#,
@@ -804,6 +816,7 @@ pub fn get_all_sessions_with_mtime(
             total_cost: row.get(11)?,
             total_tokens: row.get::<_, i64>(12)? as u64,
             total_duration_ms: row.get::<_, i64>(13)? as u64,
+            summary: row.get(14)?,
         })
     })?;
 
@@ -856,6 +869,21 @@ pub fn upsert_session_with_mtime(
             file_path,
             file_mtime
         ],
+    )?;
+    Ok(())
+}
+
+/// Store the session summary (first user message) for a session.
+/// This is called after JSONL parsing to persist the summary so it can be
+/// served from DB cache on subsequent runs without re-parsing JSONL files.
+pub fn upsert_session_summary(
+    conn: &Connection,
+    session_id: &str,
+    summary: &str,
+) -> Result<(), DbError> {
+    conn.execute(
+        "UPDATE sessions SET summary = ?1 WHERE session_id = ?2",
+        params![summary, session_id],
     )?;
     Ok(())
 }

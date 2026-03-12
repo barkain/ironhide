@@ -4,6 +4,7 @@ import { Header } from '../components/layout/Header';
 import { Card, CardContent } from '../components/ui/Card';
 import { useProjectMetrics } from '../hooks/useMetrics';
 import { useSessionUpdates } from '../hooks/useSessions';
+import { useAppStore } from '../lib/store';
 import {
   formatCurrency,
   formatNumber,
@@ -21,6 +22,8 @@ import {
   Zap,
   Clock,
   ChevronRight,
+  LayoutGrid,
+  List,
 } from 'lucide-react';
 import type { ProjectMetrics } from '../types';
 
@@ -55,6 +58,7 @@ function Projects() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('cost');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const { projectsViewMode, setProjectsViewMode } = useAppStore();
 
   // Subscribe to real-time updates
   useSessionUpdates();
@@ -152,6 +156,28 @@ function Projects() {
             <SortButton field="cost" label="Cost" />
             <SortButton field="sessions" label="Sessions" />
             <SortButton field="activity" label="Last Activity" />
+            <div className="flex items-center gap-1 ml-4 border-l border-[var(--color-border)] pl-4">
+              <button
+                onClick={() => setProjectsViewMode('grid')}
+                className={`p-1.5 rounded-md transition-colors ${
+                  projectsViewMode === 'grid'
+                    ? 'bg-[var(--color-primary-600)]/20 text-[var(--color-primary-400)]'
+                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                }`}
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => setProjectsViewMode('list')}
+                className={`p-1.5 rounded-md transition-colors ${
+                  projectsViewMode === 'list'
+                    ? 'bg-[var(--color-primary-600)]/20 text-[var(--color-primary-400)]'
+                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                }`}
+              >
+                <List className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -196,10 +222,16 @@ function Projects() {
               </p>
             </CardContent>
           </Card>
-        ) : (
+        ) : projectsViewMode === 'grid' ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {filteredProjects.map((project) => (
               <ProjectCard key={project.project_path} project={project} />
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {filteredProjects.map((project) => (
+              <ProjectListRow key={project.project_path} project={project} />
             ))}
           </div>
         )}
@@ -275,6 +307,36 @@ function ProjectCard({ project }: ProjectCardProps) {
           </div>
         </CardContent>
       </Card>
+    </Link>
+  );
+}
+
+function ProjectListRow({ project }: ProjectCardProps) {
+  const displayName = getProjectDisplayName(project.project_path);
+  const color = getProjectColor(displayName);
+  const status = getProjectStatus(project.last_activity);
+
+  return (
+    <Link to={`/sessions/project/${encodeURIComponent(project.project_path)}`}>
+      <div className="flex items-center gap-4 px-4 py-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] transition-colors hover:bg-gray-800/50">
+        <div
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md"
+          style={{ backgroundColor: `${color}20`, color }}
+        >
+          <FolderOpen className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <span className="font-medium text-white truncate">{displayName}</span>
+        </div>
+        <span className={`text-xs font-medium ${status.color}`}>{status.label}</span>
+        <div className="flex items-center gap-6 text-sm text-gray-400">
+          <span>{formatNumber(project.session_count)} sessions</span>
+          <span>{formatCurrency(project.total_cost)}</span>
+          <span>{formatCompactNumber(project.total_tokens)} tokens</span>
+          <span>{formatRelativeTime(project.last_activity)}</span>
+        </div>
+        <ChevronRight className="h-4 w-4 text-gray-600 shrink-0" />
+      </div>
     </Link>
   );
 }

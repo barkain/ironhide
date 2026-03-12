@@ -42,6 +42,18 @@ pub enum ParserError {
 /// Result type for parser operations
 pub type ParserResult<T> = Result<T, ParserError>;
 
+/// Truncate a string to at most `max_bytes` bytes, ensuring we don't split a multi-byte character.
+fn truncate_str(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 /// Information about a discovered session file
 #[derive(Debug, Clone)]
 pub struct SessionFileInfo {
@@ -281,6 +293,65 @@ where
     session::parse_session_streaming(&session_info.path, on_turn)
 }
 
+/// Lightweight extraction of the first user message from a JSONL session file.
+///
+/// Reads the file line-by-line and stops as soon as the first `type: "user"`
+/// entry with a real text message is found. Skips:
+/// - tool result entries
+/// - `isMeta: true` entries (system injections)
+/// - messages starting with XML tags like `<command-name>`, `<local-command-`
+///   (Claude Code internal commands)
+///
+/// This avoids full session parsing and is used to backfill the `summary` column
+/// for sessions that were cached before the summary feature was added.
+pub fn extract_first_user_message(path: &std::path::Path) -> Option<String> {
+    use std::io::{BufRead, BufReader};
+
+    let file = std::fs::File::open(path).ok()?;
+    let reader = BufReader::new(file);
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        // Quick JSON check: only parse lines that look like user entries
+        if !line.contains("\"type\":\"user\"") && !line.contains("\"type\": \"user\"") {
+            continue;
+        }
+
+        // Skip isMeta entries (system injections, not real user input)
+        if line.contains("\"isMeta\":true") || line.contains("\"isMeta\": true") {
+            continue;
+        }
+
+        if let Ok(entry) = jsonl::parse_line(&line) {
+            if entry.is_user_input() {
+                if let Some(content) = &entry.message_content {
+                    if let Some(text) = content.as_text() {
+                        let trimmed = text.trim();
+                        // Skip Claude Code internal commands (XML-tagged messages)
+                        if trimmed.is_empty()
+                            || trimmed.starts_with("<command-name>")
+                            || trimmed.starts_with("<local-command-")
+                        {
+                            continue;
+                        }
+                        let truncated = truncate_str(trimmed, 200).to_string();
+                        return Some(truncated);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,4 +387,5 @@ mod tests {
         let not_found = ParserError::SessionNotFound("abc123".to_string());
         assert_eq!(not_found.to_string(), "Session not found: abc123");
     }
+
 }

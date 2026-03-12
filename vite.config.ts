@@ -9,8 +9,8 @@ export default defineConfig({
   clearScreen: false,
 
   server: {
-    port: 5173,
-    strictPort: true,
+    port: 1420,
+    strictPort: false,
     // Mobile development requires host to be set
     host: process.env.TAURI_DEV_HOST || false,
     hmr: process.env.TAURI_DEV_HOST

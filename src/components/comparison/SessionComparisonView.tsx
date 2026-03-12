@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueries } from '@tanstack/react-query';
 import {
   LineChart,
   Line,
@@ -507,29 +507,29 @@ export function SessionComparisonView({ initialSessionIds }: SessionComparisonVi
   const validSelectedIds = selectedIds.filter((id): id is string => id !== null);
   const canCompare = validSelectedIds.length >= 2;
 
-  const { data: comparisonResult, isLoading: comparisonLoading } = useQuery({
+  const { data: comparisonResult, isLoading: comparisonLoading, error: comparisonError } = useQuery({
     queryKey: ['comparison', validSelectedIds],
     queryFn: () => compareSessions(validSelectedIds),
     enabled: canCompare,
   });
 
-  // Fetch detailed session data
-  const sessionDetailsQueries = validSelectedIds.map((id) =>
-    useQuery({
+  // Fetch detailed session data (useQueries ensures stable hook call count)
+  const sessionDetailsQueries = useQueries({
+    queries: validSelectedIds.map((id) => ({
       queryKey: ['session', id],
       queryFn: () => getSession(id),
       enabled: !!id,
-    })
-  );
+    })),
+  });
 
-  // Fetch turns data for charts
-  const turnsQueries = validSelectedIds.map((id) =>
-    useQuery({
+  // Fetch turns data for charts (useQueries ensures stable hook call count)
+  const turnsQueries = useQueries({
+    queries: validSelectedIds.map((id) => ({
       queryKey: ['turns', id, 1000, 0],
       queryFn: () => getTurns(id, 1000, 0),
       enabled: !!id,
-    })
-  );
+    })),
+  });
 
   const sessionDetails = useMemo(() => {
     const map = new Map<string, SessionDetail>();
@@ -660,6 +660,18 @@ export function SessionComparisonView({ initialSessionIds }: SessionComparisonVi
           <div className="animate-spin h-8 w-8 border-2 border-[var(--color-primary-500)] border-t-transparent rounded-full mx-auto" />
           <p className="mt-2 text-gray-400">Loading comparison...</p>
         </div>
+      )}
+
+      {/* Error state */}
+      {comparisonError && canCompare && (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-8">
+            <AlertCircle className="h-8 w-8 text-red-400 mb-3" />
+            <p className="text-sm text-gray-400 text-center">
+              Failed to load comparison data. {comparisonError instanceof Error ? comparisonError.message : String(comparisonError)}
+            </p>
+          </CardContent>
+        </Card>
       )}
 
       {/* Comparison Results */}

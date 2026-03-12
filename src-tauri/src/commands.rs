@@ -202,6 +202,40 @@ pub struct EfficiencyTrendPoint {
     pub sessions: u32,
 }
 
+/// Developer performance metrics response (7-axis spider chart)
+#[derive(Debug, Clone, Serialize)]
+pub struct DeveloperPerformanceResponse {
+    pub session_velocity: f64,
+    pub tool_reliability: f64,
+    pub workflow_efficiency: f64,
+    pub cost_efficiency: f64,
+    pub cache_utilization: f64,
+    pub scope_discipline: f64,
+    pub parallel_throughput: f64,
+    pub archetype: String,
+    pub overall_score: f64,
+    pub session_count: u32,
+    pub baseline: Option<Box<DeveloperPerformanceResponse>>,
+}
+
+impl From<crate::metrics::developer::DeveloperPerformanceMetrics> for DeveloperPerformanceResponse {
+    fn from(m: crate::metrics::developer::DeveloperPerformanceMetrics) -> Self {
+        Self {
+            session_velocity: m.session_velocity,
+            tool_reliability: m.tool_reliability,
+            workflow_efficiency: m.workflow_efficiency,
+            cost_efficiency: m.cost_efficiency,
+            cache_utilization: m.cache_utilization,
+            scope_discipline: m.scope_discipline,
+            parallel_throughput: m.parallel_throughput,
+            archetype: m.archetype,
+            overall_score: m.overall_score,
+            session_count: m.session_count,
+            baseline: m.baseline.map(|b| Box::new(Self::from(*b))),
+        }
+    }
+}
+
 // ============================================================================
 // Session Cache
 // ============================================================================
@@ -300,6 +334,18 @@ lazy_static::lazy_static! {
 /// Flag to track if initial preload is complete
 static SESSIONS_PRELOADED: AtomicBool = AtomicBool::new(false);
 
+/// Truncate a string to at most `max_bytes` bytes, ensuring we don't split a multi-byte character.
+fn truncate_str(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 /// Check if a session is cached and still valid
 fn get_cached_session(session_id: &str, file_info: &SessionFileInfo) -> Option<Arc<Vec<CompletedTurn>>> {
     let cache = SESSION_CACHE.read().ok()?;
@@ -363,13 +409,66 @@ fn clear_all_caches() {
 ///
 /// Returns None if the file doesn't exist or metadata cannot be read.
 /// Used for cache invalidation - if the mtime changes, we need to re-parse.
+///
+/// Uses fixed microsecond precision (6 fractional digits) to avoid mismatch
+/// between nanosecond precision on initial write and microsecond precision
+/// on subsequent reads (macOS `SystemTime` truncation issue).
 pub fn get_file_mtime(path: &Path) -> Option<String> {
     let metadata = std::fs::metadata(path).ok()?;
     let modified = metadata.modified().ok()?;
 
     // Convert SystemTime to DateTime<Utc>
     let datetime: chrono::DateTime<chrono::Utc> = modified.into();
-    Some(datetime.to_rfc3339())
+    Some(datetime.to_rfc3339_opts(chrono::SecondsFormat::Micros, true))
+}
+
+/// Compare two mtime strings for equality, tolerating format differences.
+///
+/// Handles two format differences that caused cache misses:
+/// 1. Precision: nanosecond (9 digits) vs microsecond (6 digits)
+/// 2. UTC suffix: "+00:00" vs "Z"
+///
+/// Normalizes both values before comparing.
+fn mtime_matches(stored: &str, current: &str) -> bool {
+    if stored == current {
+        return true;
+    }
+    normalize_mtime(stored) == normalize_mtime(current)
+}
+
+/// Normalize an RFC3339 timestamp to canonical form: microsecond precision with Z suffix.
+///
+/// Examples:
+///   "2026-02-19T09:57:33.939683056+00:00" → "2026-02-19T09:57:33.939683Z"
+///   "2026-02-19T09:57:33.939683+00:00"    → "2026-02-19T09:57:33.939683Z"
+///   "2026-02-19T09:57:33.939683Z"         → "2026-02-19T09:57:33.939683Z" (no change)
+fn normalize_mtime(ts: &str) -> String {
+    let mut result = ts.to_string();
+
+    // Normalize UTC suffix: replace "+00:00" with "Z"
+    if result.ends_with("+00:00") {
+        result = result[..result.len() - 6].to_string() + "Z";
+    }
+
+    // Truncate fractional seconds to 6 digits
+    if let Some(dot_pos) = result.find('.') {
+        let after_dot = &result[dot_pos + 1..];
+        let frac_len = after_dot.chars().take_while(|c| c.is_ascii_digit()).count();
+        if frac_len > 6 {
+            let end_of_frac = dot_pos + 1 + 6;
+            let suffix = &result[dot_pos + 1 + frac_len..];
+            result = format!("{}{}", &result[..end_of_frac], suffix);
+        }
+    }
+
+    // If no fractional seconds, add .000000 for canonical form
+    if result.find('.').is_none() {
+        if let Some(z_pos) = result.rfind('Z') {
+            result.insert_str(z_pos, ".000000");
+        }
+    }
+
+    result
 }
 
 /// Check if a session is cached in the database with a matching file mtime
@@ -478,8 +577,13 @@ fn compute_session_summary(file_info: &SessionFileInfo) -> SessionSummary {
             let summary = turns.iter()
                 .find_map(|t| {
                     t.user_message.as_ref()
-                        .filter(|m| !m.is_empty())
-                        .map(|m| if m.len() > 200 { m[..200].to_string() } else { m.clone() })
+                        .map(|m| m.trim())
+                        .filter(|m| {
+                            !m.is_empty()
+                                && !m.starts_with("<command-name>")
+                                && !m.starts_with("<local-command-")
+                        })
+                        .map(|m| truncate_str(m, 200).to_string())
                 });
 
             SessionSummary {
@@ -1179,7 +1283,15 @@ fn store_session_to_db(
             0.0, // TODO: efficiency_score (OES) requires deliverable_units, subagent data not available here
             cache_hit_rate,
             peak_context_pct,
-        )
+        )?;
+
+        // Persist the summary (first user message) so it can be served from DB cache
+        // on subsequent runs without re-parsing the JSONL file.
+        if let Some(ref s) = summary.summary {
+            db::queries::upsert_session_summary(conn, &summary.id, s)?;
+        }
+
+        Ok(())
     }) {
         tracing::warn!("Failed to store session {} to DB: {:?}", summary.id, e);
     }
@@ -1204,7 +1316,7 @@ fn convert_db_cache_to_summary(
         // Use file_info for current file state (subagent status and path)
         is_subagent: file_info.is_subagent,
         file_path: file_info.path.to_string_lossy().to_string(),
-        summary: None,
+        summary: cached.summary.clone(),
     }
 }
 
@@ -1246,19 +1358,27 @@ pub async fn preload_all_sessions(
     let mut cache_hits = 0;
     let mut cache_misses_list: Vec<SessionFileInfo> = Vec::new();
     let preload_limit = 500;
+    // Collect sessions that have DB cache hits but are missing the summary field.
+    // These need a lightweight backfill (extract first user message from JSONL).
+    let mut summary_backfill_list: Vec<SessionFileInfo> = Vec::new();
 
     for session in file_sessions.iter().take(preload_limit) {
         let current_mtime = get_file_mtime(&session.path);
 
         // Check if DB has valid cached data
         if let Some(cached) = db_cached_sessions.get(&session.session_id) {
-            let mtime_matches = match (&cached.file_mtime, &current_mtime) {
-                (Some(stored), Some(current)) => stored == current,
+            let is_mtime_match = match (&cached.file_mtime, &current_mtime) {
+                (Some(stored), Some(current)) => mtime_matches(stored, current),
                 _ => false,
             };
 
-            if mtime_matches {
+            if is_mtime_match {
                 cache_hits += 1;
+                // If the cached session is missing a summary, queue it for backfill.
+                // This handles sessions that were cached before the summary column was added.
+                if cached.summary.is_none() {
+                    summary_backfill_list.push(session.clone());
+                }
                 let summary = convert_db_cache_to_summary(cached, session);
                 if let Ok(mut list_cache) = SESSION_LIST_CACHE.write() {
                     list_cache.summaries.insert(session.session_id.clone(), summary);
@@ -1268,6 +1388,31 @@ pub async fn preload_all_sessions(
         }
 
         cache_misses_list.push(session.clone());
+    }
+
+    // Step 3b: Backfill missing summaries for DB-cached sessions.
+    // Uses a lightweight extraction that reads only until the first user message.
+    if !summary_backfill_list.is_empty() {
+        tracing::info!("Backfilling summaries for {} sessions missing summary text", summary_backfill_list.len());
+        let mut backfilled = 0u32;
+        for session in &summary_backfill_list {
+            if let Some(text) = crate::parser::extract_first_user_message(&session.path) {
+                // Update DB
+                if let Some(db) = state.db.get() {
+                    let _ = db.with_connection(|conn| {
+                        db::queries::upsert_session_summary(conn, &session.session_id, &text)
+                    });
+                }
+                // Update in-memory cache
+                if let Ok(mut list_cache) = SESSION_LIST_CACHE.write() {
+                    if let Some(cached_summary) = list_cache.summaries.get_mut(&session.session_id) {
+                        cached_summary.summary = Some(text);
+                    }
+                }
+                backfilled += 1;
+            }
+        }
+        tracing::info!("Backfilled {} summaries", backfilled);
     }
 
     // Step 4: Parse cache misses in parallel (up to 8 concurrent)
@@ -1359,11 +1504,11 @@ pub async fn preload_all_sessions(
                 for session in chunk {
                     let current_mtime = get_file_mtime(&session.path);
                     if let Some(cached) = db_cache_for_phase2.get(&session.session_id) {
-                        let mtime_matches = match (&cached.file_mtime, &current_mtime) {
-                            (Some(stored), Some(current)) => stored == current,
+                        let is_mtime_match = match (&cached.file_mtime, &current_mtime) {
+                            (Some(stored), Some(current)) => mtime_matches(stored, current),
                             _ => false,
                         };
-                        if mtime_matches {
+                        if is_mtime_match {
                             let summary = convert_db_cache_to_summary(cached, session);
                             chunk_cache_hits.push((session, summary));
                             continue;
@@ -1373,8 +1518,19 @@ pub async fn preload_all_sessions(
                 }
 
                 // Store cache hits into the memory cache immediately (no JSONL parsing needed)
-                for (session, summary) in chunk_cache_hits {
+                for (session, mut summary) in chunk_cache_hits {
                     phase2_cached += 1;
+                    // Backfill summary if missing (sessions cached before summary feature)
+                    if summary.summary.is_none() {
+                        if let Some(text) = crate::parser::extract_first_user_message(&session.path) {
+                            if let Some(ref db) = phase2_db {
+                                let _ = db.with_connection(|conn| {
+                                    db::queries::upsert_session_summary(conn, &session.session_id, &text)
+                                });
+                            }
+                            summary.summary = Some(text);
+                        }
+                    }
                     if let Ok(mut list_cache) = SESSION_LIST_CACHE.write() {
                         list_cache.summaries.insert(session.session_id.clone(), summary);
                     }
@@ -1452,6 +1608,9 @@ pub async fn preload_all_sessions(
                                             cache_hit_rate,
                                             peak_context_pct,
                                         )?;
+                                        if let Some(ref s) = summary.summary {
+                                            db::queries::upsert_session_summary(conn, &summary.id, s)?;
+                                        }
                                         Ok(())
                                     });
                                     phase2_processed += 1;
@@ -1764,7 +1923,7 @@ pub async fn compare_sessions(
             .find_map(|t| {
                 t.user_message.as_ref()
                     .filter(|m| !m.is_empty())
-                    .map(|m| if m.len() > 200 { m[..200].to_string() } else { m.clone() })
+                    .map(|m| truncate_str(m, 200).to_string())
             });
 
         summaries.push(SessionSummary {
@@ -2981,6 +3140,172 @@ pub async fn detect_antipatterns(
 }
 
 // ============================================================================
+// Developer Performance Commands
+// ============================================================================
+
+/// Get developer performance metrics (7-axis spider chart)
+///
+/// Analyzes sessions from the last `days` (default 90) and computes:
+/// - Session Velocity, Tool Reliability, Workflow Efficiency,
+///   Cost Efficiency, Cache Utilization, Scope Discipline, Parallel Throughput
+///
+/// Also returns a baseline from the prior 30-day window for comparison.
+///
+/// Heavy session parsing is offloaded to a blocking thread via `spawn_blocking`
+/// to avoid freezing the Tokio runtime (and thus the UI).
+#[tauri::command]
+pub async fn get_developer_metrics(
+    _state: tauri::State<'_, AppState>,
+    days: Option<u32>,
+) -> Result<DeveloperPerformanceResponse, CommandError> {
+    // Offload all heavy synchronous work (session iteration, JSONL parsing,
+    // metrics computation) to a blocking thread so the async runtime stays
+    // responsive and the UI does not freeze.
+    tokio::task::spawn_blocking(move || {
+        compute_developer_metrics_sync(days)
+    })
+    .await
+    .map_err(|e| CommandError::Internal(format!("Task join error: {}", e)))?
+}
+
+/// Synchronous implementation of developer metrics computation.
+///
+/// Separated from the async command so it can run inside `spawn_blocking`.
+/// Uses `get_session_turns` (in-memory cache + JSONL fallback) instead of
+/// `get_session_turns_with_db_cache` to avoid needing `&AppState` across
+/// the thread boundary.
+fn compute_developer_metrics_sync(
+    days: Option<u32>,
+) -> Result<DeveloperPerformanceResponse, CommandError> {
+    use crate::metrics::developer::{calculate_developer_metrics, SessionInput};
+
+    let analysis_days = days.unwrap_or(90);
+    let baseline_days = 30u32;
+
+    let now = chrono::Utc::now();
+    let analysis_start = now - chrono::Duration::days(analysis_days as i64);
+    let baseline_start = analysis_start - chrono::Duration::days(baseline_days as i64);
+
+    // Get all sessions
+    let all_sessions = get_cached_session_list();
+
+    // Build session inputs, filtering out subagents and sessions outside time range
+    let mut analysis_inputs: Vec<SessionInput> = Vec::new();
+    let mut baseline_inputs: Vec<SessionInput> = Vec::new();
+
+    for file_info in &all_sessions {
+        if file_info.is_subagent {
+            continue;
+        }
+
+        let summary = get_cached_summary(file_info);
+        if summary.total_turns == 0 {
+            continue;
+        }
+
+        // Filter by project path
+        if !is_real_user_project(&summary.project_path) {
+            continue;
+        }
+
+        // Parse timestamp
+        let started = match chrono::DateTime::parse_from_rfc3339(&summary.started_at) {
+            Ok(dt) => dt.with_timezone(&chrono::Utc),
+            Err(_) => continue,
+        };
+
+        let is_in_analysis = started >= analysis_start;
+        let is_in_baseline = started >= baseline_start && started < analysis_start;
+
+        if !is_in_analysis && !is_in_baseline {
+            continue;
+        }
+
+        // Get detailed metrics for this session using in-memory cache + JSONL fallback.
+        // We use get_session_turns (no DB cache) because AppState is not available
+        // on this blocking thread, and the in-memory cache is typically warm after
+        // preload_all_sessions runs at startup.
+        let (turns, _file_info) = match get_session_turns(&file_info.session_id) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+
+        if turns.is_empty() {
+            continue;
+        }
+
+        let (session_tokens, total_breakdown, _unique_tools, _models, tool_count, _subagent_count, duration_ms) =
+            calculate_metrics_from_turns(&turns);
+
+        let turn_data: Vec<(u64, u32)> = turns.iter().map(|t| (t.output_tokens, t.tool_count)).collect();
+        let deliverable_units = estimate_deliverable_units_v2(tool_count, &turn_data);
+        let rework_cycles = detect_rework_cycles(&turns);
+        let clarification_cycles = detect_clarification_cycles(&turns);
+        let turn_count = turns.len() as u32;
+
+        // WFS
+        let wfs = if turn_count > 0 {
+            (rework_cycles + clarification_cycles) as f64 / turn_count as f64
+        } else {
+            0.0
+        };
+
+        // CPDU
+        let cpdu = if deliverable_units > 0.0 {
+            total_breakdown.total_cost / deliverable_units
+        } else {
+            total_breakdown.total_cost
+        };
+
+        // CER
+        let cer = {
+            let total_cache = session_tokens.total_cache();
+            if total_cache > 0 {
+                session_tokens.total_cache_read as f64 / total_cache as f64
+            } else {
+                0.0
+            }
+        };
+
+        // Count error tool uses (tool uses that resulted in errors)
+        let error_tool_count = turns
+            .iter()
+            .flat_map(|t| &t.tool_uses)
+            .filter(|tu| tu.is_error)
+            .count() as u32;
+
+        let input = SessionInput {
+            session_id: file_info.session_id.clone(),
+            duration_ms,
+            deliverable_units,
+            tool_count,
+            error_tool_count,
+            wfs,
+            cpdu,
+            cer,
+            turn_count,
+            started_at: summary.started_at.clone(),
+            is_subagent: false,
+        };
+
+        if is_in_analysis {
+            analysis_inputs.push(input);
+        } else if is_in_baseline {
+            baseline_inputs.push(input);
+        }
+    }
+
+    let baseline = if baseline_inputs.is_empty() {
+        None
+    } else {
+        Some(baseline_inputs.as_slice())
+    };
+
+    let metrics = calculate_developer_metrics(&analysis_inputs, baseline);
+    Ok(DeveloperPerformanceResponse::from(metrics))
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -3250,5 +3575,68 @@ mod tests {
         let json = serde_json::to_string(&change).unwrap();
         assert!(json.contains("\"file_path\":\"/notebooks/analysis.ipynb\""));
         assert!(json.contains("\"tool_name\":\"NotebookEdit\""));
+    }
+
+    #[test]
+    fn test_normalize_mtime() {
+        // Nanosecond precision with +00:00 → microsecond with Z
+        assert_eq!(
+            normalize_mtime("2026-02-19T09:57:33.939683056+00:00"),
+            "2026-02-19T09:57:33.939683Z"
+        );
+        // Microsecond precision with +00:00 → Z
+        assert_eq!(
+            normalize_mtime("2026-02-19T09:57:33.939683+00:00"),
+            "2026-02-19T09:57:33.939683Z"
+        );
+        // Already in canonical form
+        assert_eq!(
+            normalize_mtime("2026-02-19T09:57:33.939683Z"),
+            "2026-02-19T09:57:33.939683Z"
+        );
+        // No fractional seconds → canonical form with .000000
+        assert_eq!(
+            normalize_mtime("2026-02-19T09:57:33+00:00"),
+            "2026-02-19T09:57:33.000000Z"
+        );
+        // No fractional seconds with Z suffix
+        assert_eq!(
+            normalize_mtime("2026-02-19T09:57:33Z"),
+            "2026-02-19T09:57:33.000000Z"
+        );
+    }
+
+    #[test]
+    fn test_mtime_matches_various_formats() {
+        // Same value
+        assert!(mtime_matches(
+            "2026-02-19T09:57:33.939683Z",
+            "2026-02-19T09:57:33.939683Z"
+        ));
+        // Z vs +00:00
+        assert!(mtime_matches(
+            "2026-02-19T09:57:33.939683Z",
+            "2026-02-19T09:57:33.939683+00:00"
+        ));
+        // Nanosecond vs microsecond
+        assert!(mtime_matches(
+            "2026-02-19T09:57:33.939683056+00:00",
+            "2026-02-19T09:57:33.939683Z"
+        ));
+        // Different actual times → no match
+        assert!(!mtime_matches(
+            "2026-02-19T09:57:33.939683Z",
+            "2026-02-19T09:57:34.939683Z"
+        ));
+        // Different fractional part → no match
+        assert!(!mtime_matches(
+            "2026-02-19T09:57:33.939683Z",
+            "2026-02-19T09:57:33.939684Z"
+        ));
+        // No fractional seconds vs microsecond precision
+        assert!(mtime_matches(
+            "2026-02-19T09:57:33Z",
+            "2026-02-19T09:57:33.000000Z"
+        ));
     }
 }
