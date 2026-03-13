@@ -19,20 +19,24 @@ function Settings() {
     loadSettings();
   }, []);
 
+  // Effect 1: Detect GitHub config on mount
   useEffect(() => {
-    detectGitHubConfig().then((config) => {
-      setGithubConfig(config);
-      // Auto-populate username from detected value if empty and persist immediately
-      if (settings) {
-        if (!settings.githubUsername && config.username) {
-          const updates = { githubUsername: config.username };
-          setSettings({ ...settings, ...updates });
-          setHasChanges(true);
-          updateSettings(updates);
-        }
-      }
-    }).catch(console.error);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    detectGitHubConfig().then(setGithubConfig).catch(console.error);
+  }, []);
+
+  // Effect 2: Auto-populate settings from detected config
+  useEffect(() => {
+    if (!settings || !githubConfig) return;
+    const updates: Partial<AppSettings> = {};
+    if (!settings.githubUsername && githubConfig.username) {
+      updates.githubUsername = githubConfig.username;
+    }
+    if (Object.keys(updates).length > 0) {
+      const updated = { ...settings, ...updates };
+      setSettings(updated);
+      updateSettings(updates).catch(console.error);
+    }
+  }, [settings, githubConfig]);
 
   async function loadSettings() {
     try {

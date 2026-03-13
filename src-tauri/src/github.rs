@@ -1,6 +1,8 @@
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::process::Command;
+use std::sync::Arc;
+use tokio::sync::Semaphore;
 
 /// Detect GitHub token from gh CLI or environment variables.
 pub fn detect_github_token() -> Option<String> {
@@ -120,14 +122,14 @@ pub struct SearchResult {
     pub total_count: u32,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct SearchItem {
     pub number: u32,
     pub repository_url: String,  // "https://api.github.com/repos/owner/repo"
     pub pull_request: Option<SearchPullRequest>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct SearchPullRequest {
     pub merged_at: Option<String>,
 }
@@ -152,17 +154,76 @@ fn parse_repo_from_api_url(url: &str) -> Option<(String, String)> {
     None
 }
 
+/// Fetch all commits for a single PR, paginating if necessary.
+async fn fetch_pr_commits(
+    client: &reqwest::Client,
+    token: &str,
+    owner: &str,
+    repo: &str,
+    pr_number: u32,
+    since: &str,
+    until: &str,
+) -> Vec<(String, u32)> {
+    let mut all_date_pairs = Vec::new();
+    let mut page = 1u32;
+
+    loop {
+        let commits_url = format!(
+            "https://api.github.com/repos/{}/{}/pulls/{}/commits?per_page=100&page={}",
+            owner, repo, pr_number, page
+        );
+        let resp = match client.get(&commits_url)
+            .header("Authorization", format!("Bearer {}", token))
+            .header("User-Agent", "ironhide")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(_) => break,
+        };
+
+        if !resp.status().is_success() {
+            break;
+        }
+
+        let commits: Vec<GitHubCommit> = resp.json().await.unwrap_or_default();
+        let count = commits.len();
+
+        for commit in commits {
+            if let Some(author) = commit.commit.author {
+                if let Some(date_str) = author.date {
+                    if date_str.len() >= 10 {
+                        let date = date_str[..10].to_string();
+                        // Bug 3 fix: use exclusive upper bound (date < until)
+                        if date.as_str() >= since && date.as_str() < until {
+                            all_date_pairs.push((date, pr_number));
+                        }
+                    }
+                }
+            }
+        }
+
+        // If we got fewer than 100 commits, no more pages
+        if count < 100 {
+            break;
+        }
+        page += 1;
+    }
+
+    all_date_pairs
+}
+
 /// Fetch merged PRs and commit concurrency data from GitHub for a date range.
 /// Searches across ALL repos the user has contributed to using the GitHub Search API.
 pub async fn fetch_sprint_github_data(
+    client: &reqwest::Client,
     token: &str,
     username: &str,
     since: &str,  // ISO date like "2026-03-01"
     until: &str,  // ISO date like "2026-03-14"
     sprint_days: u32,
 ) -> Result<SprintGitHubData, String> {
-    let client = reqwest::Client::new();
-
     // Search for all merged PRs by this user in the date range across all repos
     let query = format!(
         "is:pr is:merged author:{} merged:{}..{}",
@@ -187,45 +248,74 @@ pub async fn fetch_sprint_github_data(
     let search_result: SearchResult = resp.json().await
         .map_err(|e| format!("JSON parse error: {}", e))?;
 
-    let prs_merged = search_result.items.len() as u32;
+    // Bug 2 fix: use total_count for accurate PR count without full pagination
+    let prs_merged = search_result.total_count;
 
-    // For each merged PR, fetch commits and record commit dates
-    // Map: date -> set of (repo, PR number) tuples to track concurrency
-    let mut date_to_prs: HashMap<String, HashSet<(String, u32)>> = HashMap::new();
+    // Paginate search results to get all items for concurrency calculation
+    let mut all_items = search_result.items;
+    let total_count = prs_merged;
 
-    for (idx, item) in search_result.items.iter().enumerate() {
+    if total_count > 100 {
+        let total_pages = ((total_count as f64) / 100.0).ceil() as u32;
+        let max_pages = total_pages.min(10); // Safety limit
+        for page in 2..=max_pages {
+            let page_url = format!("{}&page={}", url, page);
+            let resp = client.get(&page_url)
+                .header("Authorization", format!("Bearer {}", token))
+                .header("User-Agent", "ironhide")
+                .header("Accept", "application/vnd.github+json")
+                .send()
+                .await
+                .map_err(|e| format!("GitHub Search API pagination error: {}", e))?;
+
+            if !resp.status().is_success() {
+                break;
+            }
+
+            let page_result: SearchResult = resp.json().await
+                .map_err(|e| format!("JSON parse error on page {}: {}", page, e))?;
+
+            if page_result.items.is_empty() {
+                break;
+            }
+            all_items.extend(page_result.items);
+        }
+    }
+
+    // Bug 4 fix: fetch commits for all PRs concurrently with a semaphore
+    let semaphore = Arc::new(Semaphore::new(10));
+    let mut handles = Vec::new();
+
+    for item in &all_items {
         let (owner, repo) = match parse_repo_from_api_url(&item.repository_url) {
             Some(pair) => pair,
             None => continue,
         };
 
-        // Add a small delay between requests to respect rate limits
-        if idx > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
+        let sem = semaphore.clone();
+        let client = client.clone();
+        let token = token.to_string();
+        let number = item.number;
+        let since = since.to_string();
+        let until = until.to_string();
 
-        let commits_url = format!(
-            "https://api.github.com/repos/{}/{}/pulls/{}/commits?per_page=100",
-            owner, repo, item.number
-        );
-        let resp = client.get(&commits_url)
-            .header("Authorization", format!("Bearer {}", token))
-            .header("User-Agent", "ironhide")
-            .header("Accept", "application/vnd.github+json")
-            .send()
-            .await
-            .map_err(|e| format!("GitHub API error: {}", e))?;
+        handles.push(tokio::spawn(async move {
+            let _permit = sem.acquire().await.unwrap();
+            fetch_pr_commits(&client, &token, &owner, &repo, number, &since, &until).await
+        }));
+    }
 
-        if resp.status().is_success() {
-            let commits: Vec<GitHubCommit> = resp.json().await.unwrap_or_default();
-            let pr_key = format!("{}/{}", owner, repo);
-            for commit in commits {
-                if let Some(author) = commit.commit.author {
-                    if let Some(date_str) = author.date {
-                        let date = date_str[..10].to_string();
-                        if date.as_str() >= since && date.as_str() <= until {
-                            date_to_prs.entry(date).or_default().insert((pr_key.clone(), item.number));
-                        }
+    // Collect results into the date_to_prs map
+    let mut date_to_prs: HashMap<String, HashSet<(String, u32)>> = HashMap::new();
+    let results = futures::future::join_all(handles).await;
+    for result in results {
+        if let Ok(date_pairs) = result {
+            for (date, pr_number) in date_pairs {
+                // Find the repo key from the pr_number by looking up in all_items
+                if let Some(item) = all_items.iter().find(|i| i.number == pr_number) {
+                    if let Some((owner, repo)) = parse_repo_from_api_url(&item.repository_url) {
+                        let pr_key = format!("{}/{}", owner, repo);
+                        date_to_prs.entry(date).or_default().insert((pr_key, pr_number));
                     }
                 }
             }

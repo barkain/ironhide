@@ -3237,6 +3237,9 @@ pub async fn get_developer_metrics(
     let analysis_sprints = num_sprints.unwrap_or(4);
     let total_sprints = analysis_sprints * 2;
 
+    // Bug 4 fix: create HTTP client once and reuse across all sprint fetches
+    let client = reqwest::Client::new();
+
     let mut all_sprint_inputs: Vec<SprintInput> = Vec::new();
 
     for i in 0..total_sprints {
@@ -3248,6 +3251,7 @@ pub async fn get_developer_metrics(
 
         // Fetch GitHub data for this sprint (searches across all repos)
         let github_data = fetch_sprint_github_data(
+            &client,
             &token,
             &github_username,
             &since,
