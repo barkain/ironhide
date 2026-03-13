@@ -95,9 +95,29 @@ export async function getProjectMetrics(days?: number): Promise<ProjectMetrics[]
 // Developer Performance Commands
 // ============================================================================
 
-/** Get developer performance metrics (7-axis spider chart) */
-export async function getDeveloperMetrics(days?: number): Promise<DeveloperPerformanceMetrics> {
-  return invoke('get_developer_metrics', { days: days ?? null });
+/** GitHub auto-detected configuration */
+export interface GitHubConfig {
+  has_token: boolean;
+  token_source: string | null;
+  username: string | null;
+}
+
+/** Auto-detect GitHub configuration from environment */
+export async function detectGitHubConfig(): Promise<GitHubConfig> {
+  return invoke('detect_github_config');
+}
+
+/** Get developer performance metrics (3-axis AI adoption) */
+export async function getDeveloperMetrics(settings: {
+  githubUsername: string;
+  sprintDays?: number;
+  numSprints?: number;
+}): Promise<DeveloperPerformanceMetrics> {
+  return invoke('get_developer_metrics', {
+    githubUsername: settings.githubUsername,
+    sprintDays: settings.sprintDays ?? null,
+    numSprints: settings.numSprints ?? null,
+  });
 }
 
 // ============================================================================
@@ -123,6 +143,9 @@ export interface AppSettings {
   autoRefresh: boolean;
   refreshIntervalMinutes: number;
   theme: 'light' | 'dark';
+  githubUsername: string;
+  sprintDays: number;
+  numSprints: number;
 }
 
 // Settings are managed client-side for now
@@ -131,6 +154,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoRefresh: true,
   refreshIntervalMinutes: 5,
   theme: 'dark',
+  githubUsername: '',
+  sprintDays: 14,
+  numSprints: 4,
 };
 
 export async function getSettings(): Promise<AppSettings> {

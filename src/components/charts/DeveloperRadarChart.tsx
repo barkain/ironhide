@@ -1,187 +1,215 @@
 import {
-  Radar,
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
+  ScatterChart,
+  Scatter,
+  XAxis,
+  YAxis,
+  ZAxis,
+  CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend,
+  Label,
 } from 'recharts';
 import { useThemeColors } from '../../hooks/useThemeColors';
 import type { DeveloperPerformanceMetrics } from '../../types';
 
-interface DeveloperRadarChartProps {
+interface DeveloperBubbleChartProps {
   metrics: DeveloperPerformanceMetrics;
 }
 
-interface RadarDataPoint {
-  axis: string;
-  fullName: string;
-  current: number;
-  baseline: number | null;
-  fullMark: number;
-  tooltip: string;
-}
+/**
+ * Compute bubble color based on position in the chart using 4-corner bilinear interpolation.
+ * - Bottom-left (low X, low Y): Grey #9ca3af
+ * - Top-left (low X, high Y): Orange #fb923c
+ * - Bottom-right (high X, low Y): Magenta #e879f9
+ * - Top-right (high X, high Y): Green #22c55e
+ */
+function getBubbleColor(x: number, y: number): { fill: string; opacity: number } {
+  const nx = Math.min(x / 10, 1);
+  const ny = Math.min(y / 10, 1);
 
-const AXIS_TOOLTIPS: Record<string, string> = {
-  'Session Velocity': 'Measures deliverable units produced per hour of session time. Normalized to 0-10 scale.',
-  'Tool Reliability': 'Percentage of tool calls that succeed without errors. Score of 10 = zero errors.',
-  'Workflow Efficiency': 'How smoothly sessions flow without rework or clarification. Based on inverse of Workflow Friction Score.',
-  'Cost Efficiency': 'Output per dollar of API cost. 10/avg_CPDU, capped at 10. Score of 10 = $1 or less per deliverable unit.',
-  'Cache Utilization': 'Cache read efficiency ratio. Higher = better context reuse, less redundant token processing.',
-  'Scope Discipline': 'Proportion of sessions within P75 turn count. Higher = focused execution without excessive back-and-forth.',
-  'Parallel Throughput': 'Average concurrent sessions per active day. Higher = effective parallel workflows.',
-};
+  // 4-corner colors
+  const bl = { r: 156, g: 163, b: 175 }; // grey (low X, low Y)
+  const tl = { r: 251, g: 146, b: 60 };  // orange (low X, high Y)
+  const br = { r: 232, g: 121, b: 249 }; // magenta (high X, low Y)
+  const tr = { r: 34, g: 197, b: 94 };   // green (high X, high Y)
 
-function prepareRadarData(metrics: DeveloperPerformanceMetrics): RadarDataPoint[] {
-  const axes = [
-    { key: 'session_velocity', short: 'Velocity', full: 'Session Velocity' },
-    { key: 'tool_reliability', short: 'Reliability', full: 'Tool Reliability' },
-    { key: 'workflow_efficiency', short: 'Workflow', full: 'Workflow Efficiency' },
-    { key: 'cost_efficiency', short: 'Cost', full: 'Cost Efficiency' },
-    { key: 'cache_utilization', short: 'Cache', full: 'Cache Utilization' },
-    { key: 'scope_discipline', short: 'Scope', full: 'Scope Discipline' },
-    { key: 'parallel_throughput', short: 'Parallel', full: 'Parallel Throughput' },
-  ] as const;
-
-  return axes.map(({ key, short, full }) => ({
-    axis: short,
-    fullName: full,
-    current: metrics[key],
-    baseline: metrics.baseline ? metrics.baseline[key] : null,
-    fullMark: 10,
-    tooltip: AXIS_TOOLTIPS[full] ?? '',
-  }));
-}
-
-function CustomAxisTick({ x, y, payload, data }: { x: number; y: number; payload: { value: string }; data: RadarDataPoint[] }) {
-  const point = data.find((d: RadarDataPoint) => d.axis === payload.value);
-  if (!point) return null;
-
-  return (
-    <g>
-      <text x={x} y={y} textAnchor="middle" fill="var(--color-text-secondary)" fontSize={12}>
-        {payload.value}
-      </text>
-      <text x={x} y={y + 16} textAnchor="middle" fill="#3b82f6" fontSize={13} fontWeight="600">
-        {point.current.toFixed(1)}
-      </text>
-    </g>
+  // Bilinear interpolation
+  const r = Math.round(
+    bl.r * (1 - nx) * (1 - ny) +
+    br.r * nx * (1 - ny) +
+    tl.r * (1 - nx) * ny +
+    tr.r * nx * ny
   );
+  const g = Math.round(
+    bl.g * (1 - nx) * (1 - ny) +
+    br.g * nx * (1 - ny) +
+    tl.g * (1 - nx) * ny +
+    tr.g * nx * ny
+  );
+  const b = Math.round(
+    bl.b * (1 - nx) * (1 - ny) +
+    br.b * nx * (1 - ny) +
+    tl.b * (1 - nx) * ny +
+    tr.b * nx * ny
+  );
+
+  // Opacity: more opaque toward top-right (better position)
+  const opacity = 0.3 + (nx + ny) / 2 * 0.6;
+
+  return { fill: `rgb(${r}, ${g}, ${b})`, opacity };
+}
+
+interface SprintDataPoint {
+  name: string;
+  x: number;
+  y: number;
+  z: number;
+  isMostRecent: boolean;
+  startDate: string;
+  endDate: string;
+  rawThroughput: number;
+  rawParallelism: number;
+  rawRoi: number;
+  fill: string;
+  opacity: number;
 }
 
 interface CustomTooltipProps {
   active?: boolean;
-  payload?: Array<{
-    payload: RadarDataPoint;
-    name: string;
-    value: number;
-  }>;
-  themeColors?: ReturnType<typeof useThemeColors>;
+  payload?: Array<{ payload: SprintDataPoint }>;
 }
 
-function CustomTooltip({ active, payload, themeColors }: CustomTooltipProps) {
+function CustomTooltip({ active, payload }: CustomTooltipProps) {
   if (!active || !payload || payload.length === 0) return null;
-
-  const data = payload[0].payload;
+  const d = payload[0].payload;
 
   return (
     <div
       style={{
-        backgroundColor: themeColors?.tooltipBg ?? '#1a2332',
-        border: `1px solid ${themeColors?.tooltipBorder ?? '#2a3a4e'}`,
+        backgroundColor: '#1a2332',
+        border: '1px solid #2a3a4e',
         borderRadius: '8px',
         padding: '10px 14px',
-        maxWidth: '280px',
+        maxWidth: '260px',
       }}
     >
-      <p style={{ color: themeColors?.tooltipText ?? '#fff', fontWeight: 600, marginBottom: 4 }}>
-        {data.fullName}
+      <p style={{ color: '#fff', fontWeight: 600, marginBottom: 4 }}>
+        {d.name}
       </p>
-      <p style={{ color: '#3b82f6', fontSize: 14 }}>
-        Current: {data.current.toFixed(1)} / 10
+      <p style={{ color: 'var(--color-text-muted)', fontSize: 12, marginBottom: 6 }}>
+        {d.startDate} → {d.endDate}
       </p>
-      {data.baseline !== null && (
-        <p style={{ color: '#8b5cf6', fontSize: 14 }}>
-          Baseline: {data.baseline.toFixed(1)} / 10
-        </p>
-      )}
-      {data.baseline !== null && (
-        <p
-          style={{
-            color: data.current >= data.baseline ? '#10b981' : '#ef4444',
-            fontSize: 12,
-            marginTop: 2,
-          }}
-        >
-          {data.current >= data.baseline ? '+' : ''}
-          {(data.current - data.baseline).toFixed(1)} vs baseline
-        </p>
-      )}
-      {data.tooltip && (
-        <p style={{ color: '#e879f9', fontSize: 11, marginTop: 6, lineHeight: '1.4' }}>
-          {data.tooltip}
-        </p>
-      )}
+      <p style={{ color: '#e879f9', fontSize: 13 }}>
+        Throughput: {d.x.toFixed(1)} ({d.rawThroughput.toFixed(1)} PRs/sprint)
+      </p>
+      <p style={{ color: '#fb923c', fontSize: 13 }}>
+        Parallelism: {d.y.toFixed(1)} ({d.rawParallelism.toFixed(2)} ratio)
+      </p>
+      <p style={{ color: '#10b981', fontSize: 13 }}>
+        AI ROI: {d.z.toFixed(1)} ({d.rawRoi.toFixed(1)} PRs/$100)
+      </p>
     </div>
   );
 }
 
-export function DeveloperRadarChart({ metrics }: DeveloperRadarChartProps) {
+function renderSprintBubble(props: any) {
+  const { cx, cy, payload } = props;
+  if (cx === undefined || cy === undefined) return null;
+
+  const baseSize = Math.max(12, payload.z * 3);
+  const size = payload.isMostRecent ? baseSize + 4 : baseSize;
+  const { fill, opacity } = getBubbleColor(payload.x, payload.y);
+
+  return (
+    <g>
+      <circle
+        cx={cx}
+        cy={cy}
+        r={size}
+        fill={fill}
+        opacity={opacity}
+        stroke={payload.isMostRecent ? '#fff' : fill}
+        strokeWidth={payload.isMostRecent ? 2 : 0}
+      />
+      {/* Show ROI score inside for most recent sprint */}
+      {payload.isMostRecent && (
+        <text
+          x={cx}
+          y={cy}
+          textAnchor="middle"
+          dominantBaseline="central"
+          fill="#fff"
+          fontSize={12}
+          fontWeight="700"
+        >
+          {payload.z.toFixed(1)}
+        </text>
+      )}
+    </g>
+  );
+}
+
+export function DeveloperRadarChart({ metrics }: DeveloperBubbleChartProps) {
   const tc = useThemeColors();
 
-  const radarData = prepareRadarData(metrics);
-  const hasBaseline = metrics.baseline !== null;
+  const sprintData: SprintDataPoint[] = (metrics.sprints || []).map((s, _i) => {
+    const color = getBubbleColor(s.throughput_velocity_score, s.parallelism_ratio_score);
+    return {
+      name: `Sprint ${metrics.sprints.length - s.index}`,
+      x: s.throughput_velocity_score,
+      y: s.parallelism_ratio_score,
+      z: s.ai_roi_score,
+      isMostRecent: s.index === 0,
+      startDate: s.start_date,
+      endDate: s.end_date,
+      rawThroughput: s.throughput_velocity,
+      rawParallelism: s.parallelism_ratio,
+      rawRoi: s.ai_roi,
+      fill: color.fill,
+      opacity: color.opacity,
+    };
+  });
 
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <RadarChart cx="50%" cy="50%" outerRadius="75%" data={radarData}>
-        <defs>
-          <linearGradient id="devRadarCurrent" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.8} />
-            <stop offset="100%" stopColor="#3b82f6" stopOpacity={0.3} />
-          </linearGradient>
-          <linearGradient id="devRadarBaseline" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.5} />
-            <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0.1} />
-          </linearGradient>
-        </defs>
-        <PolarGrid stroke={tc.gridStroke} gridType="polygon" />
-        <PolarRadiusAxis
-          angle={90}
+      <ScatterChart margin={{ top: 20, right: 30, bottom: 20, left: 10 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke={tc.gridStroke} opacity={0.3} />
+        <XAxis
+          type="number"
+          dataKey="x"
           domain={[0, 10]}
-          tick={false}
-          axisLine={false}
           tickCount={6}
-        />
-        <PolarAngleAxis
-          dataKey="axis"
-          tick={(props: any) => <CustomAxisTick {...props} data={radarData} />}
-          tickLine={false}
-        />
-        {hasBaseline && (
-          <Radar
-            name="Baseline"
-            dataKey="baseline"
-            stroke="#8b5cf6"
-            fill="url(#devRadarBaseline)"
-            fillOpacity={0.3}
-            strokeWidth={1}
-            strokeDasharray="4 4"
+          tick={{ fill: 'var(--color-text-muted)', fontSize: 11 }}
+          stroke={tc.gridStroke}
+        >
+          <Label
+            value="Throughput Velocity"
+            position="bottom"
+            offset={0}
+            style={{ fill: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500 }}
           />
-        )}
-        <Radar
-          name="Current"
-          dataKey="current"
-          stroke="#3b82f6"
-          fill="url(#devRadarCurrent)"
-          fillOpacity={0.5}
-          strokeWidth={2}
-        />
-        <Tooltip content={<CustomTooltip themeColors={tc} />} />
-        {hasBaseline && <Legend />}
-      </RadarChart>
+        </XAxis>
+        <YAxis
+          type="number"
+          dataKey="y"
+          domain={[0, 10]}
+          tickCount={6}
+          tick={{ fill: 'var(--color-text-muted)', fontSize: 11 }}
+          stroke={tc.gridStroke}
+        >
+          <Label
+            value="Parallelism Ratio"
+            angle={-90}
+            position="insideLeft"
+            offset={10}
+            style={{ fill: 'var(--color-text-secondary)', fontSize: 13, fontWeight: 500 }}
+          />
+        </YAxis>
+        <ZAxis type="number" dataKey="z" domain={[0, 10]} range={[80, 400]} />
+        <Tooltip content={<CustomTooltip />} />
+
+        <Scatter data={sprintData} shape={renderSprintBubble} />
+      </ScatterChart>
     </ResponsiveContainer>
   );
 }
