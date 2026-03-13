@@ -163,8 +163,9 @@ async fn fetch_pr_commits(
     pr_number: u32,
     since: &str,
     until: &str,
-) -> Vec<(String, u32)> {
+) -> Vec<(String, String)> {
     let mut all_date_pairs = Vec::new();
+    let pr_key = format!("{}/{}#{}", owner, repo, pr_number);
     let mut page = 1u32;
 
     loop {
@@ -197,7 +198,7 @@ async fn fetch_pr_commits(
                         let date = date_str[..10].to_string();
                         // Bug 3 fix: use exclusive upper bound (date < until)
                         if date.as_str() >= since && date.as_str() < until {
-                            all_date_pairs.push((date, pr_number));
+                            all_date_pairs.push((date, pr_key.clone()));
                         }
                     }
                 }
@@ -306,18 +307,13 @@ pub async fn fetch_sprint_github_data(
     }
 
     // Collect results into the date_to_prs map
-    let mut date_to_prs: HashMap<String, HashSet<(String, u32)>> = HashMap::new();
+    // Use composite "owner/repo#number" keys to avoid cross-repo PR number collisions
+    let mut date_to_prs: HashMap<String, HashSet<String>> = HashMap::new();
     let results = futures::future::join_all(handles).await;
     for result in results {
         if let Ok(date_pairs) = result {
-            for (date, pr_number) in date_pairs {
-                // Find the repo key from the pr_number by looking up in all_items
-                if let Some(item) = all_items.iter().find(|i| i.number == pr_number) {
-                    if let Some((owner, repo)) = parse_repo_from_api_url(&item.repository_url) {
-                        let pr_key = format!("{}/{}", owner, repo);
-                        date_to_prs.entry(date).or_default().insert((pr_key, pr_number));
-                    }
-                }
+            for (date, pr_key) in date_pairs {
+                date_to_prs.entry(date).or_default().insert(pr_key);
             }
         }
     }
