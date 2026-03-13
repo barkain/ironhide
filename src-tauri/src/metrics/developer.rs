@@ -1,84 +1,86 @@
-//! Developer Performance metrics
+//! Developer AI Adoption Metrics
 //!
-//! Computes a 7-axis spider chart profile from session data:
-//! 1. Session Velocity - deliverable units per hour
-//! 2. Tool Reliability - success rate of tool invocations
-//! 3. Workflow Efficiency - inverse of workflow friction
-//! 4. Cost Efficiency - inverse of cost per deliverable unit
-//! 5. Cache Utilization - cache read efficiency
-//! 6. Scope Discipline - percentage of sessions within P75 turn count
-//! 7. Parallel Throughput - concurrent sessions per day
+//! Computes a 3-axis performance profile:
+//! 1. Throughput Velocity - PRs merged per sprint
+//! 2. Parallelism Ratio - concurrent commit-days / sprint days
+//! 3. AI ROI - PRs merged per $100 of Claude Code spend
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
-/// Developer performance profile across 7 axes (all 0-10 scale)
+/// Developer performance profile across 3 axes (all 0-10 scale)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeveloperPerformanceMetrics {
-    /// Deliverable units per session hour, normalized 0-10
-    pub session_velocity: f64,
-    /// (1 - error_tool_uses/total_tool_uses) * 10
-    pub tool_reliability: f64,
-    /// (1 - avg_WFS) * 10
-    pub workflow_efficiency: f64,
-    /// min(10/avg_CPDU, 10)
-    pub cost_efficiency: f64,
-    /// avg_CER * 10
-    pub cache_utilization: f64,
-    /// (sessions_within_p75_turns / total) * 10
-    pub scope_discipline: f64,
-    /// avg_concurrent_sessions_per_day, normalized 0-10
-    pub parallel_throughput: f64,
+    /// Raw: PRs merged per sprint
+    pub throughput_velocity: f64,
+    /// Raw: concurrent commit-days / sprint days
+    pub parallelism_ratio: f64,
+    /// Raw: PRs merged per $100 CC spend
+    pub ai_roi: f64,
+    /// Score 0-10
+    pub throughput_velocity_score: f64,
+    /// Score 0-10
+    pub parallelism_ratio_score: f64,
+    /// Score 0-10
+    pub ai_roi_score: f64,
     /// Detected archetype label
     pub archetype: String,
-    /// Average of all 7 axes
+    /// Average of all 3 scores
     pub overall_score: f64,
-    /// Number of sessions analyzed
-    pub session_count: u32,
-    /// Baseline comparison metrics (prior period)
+    /// Number of sprints analyzed
+    pub sprint_count: u32,
+    /// Total PRs merged in analysis window
+    pub prs_merged: u32,
+    /// Total CC spend in USD
+    pub total_cc_spend: f64,
+    /// Per-sprint scores for individual bubble rendering
+    pub sprints: Vec<SprintScore>,
+    /// Baseline comparison (prior period)
     pub baseline: Option<Box<DeveloperPerformanceMetrics>>,
 }
 
-/// Per-session data needed for developer metrics calculation
-#[derive(Debug, Clone)]
-pub struct SessionInput {
-    /// Session ID
-    pub session_id: String,
-    /// Duration in milliseconds
-    pub duration_ms: u64,
-    /// Estimated deliverable units
-    pub deliverable_units: f64,
-    /// Total tool invocations
-    pub tool_count: u32,
-    /// Tool invocations that resulted in errors
-    pub error_tool_count: u32,
-    /// Workflow Friction Score (0.0-1.0)
-    pub wfs: f64,
-    /// Cost Per Deliverable Unit
-    pub cpdu: f64,
-    /// Cache Efficiency Ratio (0.0-1.0)
-    pub cer: f64,
-    /// Number of turns in session
-    pub turn_count: u32,
-    /// Session start timestamp (ISO 8601)
-    pub started_at: String,
-    /// Is this a subagent session?
-    pub is_subagent: bool,
+/// Per-sprint computed scores (for individual bubble rendering)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SprintScore {
+    /// Sprint index (0 = most recent)
+    pub index: u32,
+    /// Sprint start date (ISO format)
+    pub start_date: String,
+    /// Sprint end date (ISO format)
+    pub end_date: String,
+    /// Raw values
+    pub throughput_velocity: f64,
+    pub parallelism_ratio: f64,
+    pub ai_roi: f64,
+    /// Scores 0-10
+    pub throughput_velocity_score: f64,
+    pub parallelism_ratio_score: f64,
+    pub ai_roi_score: f64,
 }
 
-/// Calculate developer performance metrics from a set of sessions.
-///
-/// `sessions` is the primary analysis window.
-/// `baseline_sessions` is an optional prior period for comparison.
-pub fn calculate_developer_metrics(
-    sessions: &[SessionInput],
-    baseline_sessions: Option<&[SessionInput]>,
-) -> DeveloperPerformanceMetrics {
-    let metrics = compute_axes(sessions);
+/// Per-sprint input data
+#[derive(Debug, Clone)]
+pub struct SprintInput {
+    pub prs_merged: u32,
+    pub concurrent_commit_days: u32,
+    pub sprint_days: u32,
+    pub cc_spend_usd: f64,
+    pub start_date: String,
+    pub end_date: String,
+}
 
-    let baseline = baseline_sessions.map(|bs| {
+/// Calculate developer metrics from sprint data.
+///
+/// `sprints` is the primary analysis window.
+/// `baseline_sprints` is an optional prior period for comparison.
+pub fn calculate_developer_metrics(
+    sprints: &[SprintInput],
+    baseline_sprints: Option<&[SprintInput]>,
+) -> DeveloperPerformanceMetrics {
+    let metrics = compute_axes(sprints);
+
+    let baseline = baseline_sprints.map(|bs| {
         let mut baseline_metrics = compute_axes(bs);
-        baseline_metrics.baseline = None; // No nested baselines
+        baseline_metrics.baseline = None;
         Box::new(baseline_metrics)
     });
 
@@ -88,154 +90,166 @@ pub fn calculate_developer_metrics(
     }
 }
 
-/// Compute all 7 axes and archetype from session inputs.
-fn compute_axes(sessions: &[SessionInput]) -> DeveloperPerformanceMetrics {
-    if sessions.is_empty() {
+fn compute_axes(sprints: &[SprintInput]) -> DeveloperPerformanceMetrics {
+    if sprints.is_empty() {
         return DeveloperPerformanceMetrics {
-            session_velocity: 0.0,
-            tool_reliability: 10.0,
-            workflow_efficiency: 10.0,
-            cost_efficiency: 10.0,
-            cache_utilization: 0.0,
-            scope_discipline: 10.0,
-            parallel_throughput: 0.0,
-            archetype: "Developing".to_string(),
+            throughput_velocity: 0.0,
+            parallelism_ratio: 0.0,
+            ai_roi: 0.0,
+            throughput_velocity_score: 0.0,
+            parallelism_ratio_score: 0.0,
+            ai_roi_score: 0.0,
+            archetype: "Early Adopter".to_string(),
             overall_score: 0.0,
-            session_count: 0,
+            sprint_count: 0,
+            prs_merged: 0,
+            total_cc_spend: 0.0,
+            sprints: Vec::new(),
             baseline: None,
         };
     }
 
-    let session_count = sessions.len() as u32;
+    let sprint_count = sprints.len() as u32;
+    let total_prs: u32 = sprints.iter().map(|s| s.prs_merged).sum();
+    let total_cc_spend: f64 = sprints.iter().map(|s| s.cc_spend_usd).sum();
+    let total_concurrent_days: u32 = sprints.iter().map(|s| s.concurrent_commit_days).sum();
+    let total_sprint_days: u32 = sprints.iter().map(|s| s.sprint_days).sum();
 
-    // 1. Session Velocity: deliverable_units / session_hours, normalized
-    let session_velocity = {
-        let total_du: f64 = sessions.iter().map(|s| s.deliverable_units).sum();
-        let total_hours: f64 = sessions
-            .iter()
-            .map(|s| s.duration_ms as f64 / 3_600_000.0)
-            .sum();
-        let raw = if total_hours > 0.0 {
-            total_du / total_hours
+    // Raw values (per sprint averages)
+    let throughput_velocity = total_prs as f64 / sprint_count as f64;
+    let parallelism_ratio = if total_sprint_days > 0 {
+        total_concurrent_days as f64 / total_sprint_days as f64
+    } else {
+        0.0
+    };
+    let ai_roi = if total_cc_spend > 0.0 {
+        (total_prs as f64 / total_cc_spend) * 100.0
+    } else {
+        0.0
+    };
+
+    // Scoring (0-10 scale based on PDF thresholds)
+    let throughput_velocity_score = score_throughput(throughput_velocity);
+    let parallelism_ratio_score = score_parallelism(parallelism_ratio);
+    let ai_roi_score = score_roi(ai_roi);
+
+    let scores = [throughput_velocity_score, parallelism_ratio_score, ai_roi_score];
+    let overall_score = scores.iter().sum::<f64>() / scores.len() as f64;
+
+    let archetype = detect_archetype(throughput_velocity_score, parallelism_ratio_score, ai_roi_score);
+
+    let sprint_scores: Vec<SprintScore> = sprints.iter().enumerate().map(|(i, s)| {
+        let tv = s.prs_merged as f64; // raw: PRs this sprint (already per-sprint)
+        let pr = if s.sprint_days > 0 {
+            s.concurrent_commit_days as f64 / s.sprint_days as f64
         } else {
             0.0
         };
-        (raw / 2.0).min(10.0)
-    };
-
-    // 2. Tool Reliability: (1 - error_rate) * 10
-    let tool_reliability = {
-        let total_tools: u32 = sessions.iter().map(|s| s.tool_count).sum();
-        let total_errors: u32 = sessions.iter().map(|s| s.error_tool_count).sum();
-        if total_tools > 0 {
-            ((1.0 - total_errors as f64 / total_tools as f64) * 10.0).clamp(0.0, 10.0)
-        } else {
-            10.0
-        }
-    };
-
-    // 3. Workflow Efficiency: (1 - avg_WFS) * 10
-    let workflow_efficiency = {
-        let avg_wfs: f64 =
-            sessions.iter().map(|s| s.wfs).sum::<f64>() / session_count as f64;
-        ((1.0 - avg_wfs) * 10.0).clamp(0.0, 10.0)
-    };
-
-    // 4. Cost Efficiency: min(10/avg_CPDU, 10)
-    let cost_efficiency = {
-        let avg_cpdu: f64 =
-            sessions.iter().map(|s| s.cpdu).sum::<f64>() / session_count as f64;
-        if avg_cpdu > 0.0 {
-            (10.0 / avg_cpdu).min(10.0)
-        } else {
-            10.0
-        }
-    };
-
-    // 5. Cache Utilization: avg_CER * 10
-    let cache_utilization = {
-        let avg_cer: f64 =
-            sessions.iter().map(|s| s.cer).sum::<f64>() / session_count as f64;
-        (avg_cer * 10.0).min(10.0)
-    };
-
-    // 6. Scope Discipline: proportion of sessions within P75 turn count
-    let scope_discipline = {
-        let mut turn_counts: Vec<u32> = sessions.iter().map(|s| s.turn_count).collect();
-        turn_counts.sort_unstable();
-        let p75_idx = (turn_counts.len() as f64 * 0.75).floor() as usize;
-        let p75_value = turn_counts[p75_idx.min(turn_counts.len() - 1)];
-        let within_p75 = sessions
-            .iter()
-            .filter(|s| s.turn_count <= p75_value)
-            .count();
-        (within_p75 as f64 / session_count as f64 * 10.0).min(10.0)
-    };
-
-    // 7. Parallel Throughput: average concurrent sessions per day
-    let parallel_throughput = {
-        let mut sessions_per_day: HashMap<String, u32> = HashMap::new();
-        for s in sessions {
-            let date = s.started_at.split('T').next().unwrap_or("unknown");
-            *sessions_per_day.entry(date.to_string()).or_default() += 1;
-        }
-        let num_days = sessions_per_day.len() as f64;
-        let avg_per_day = if num_days > 0.0 {
-            session_count as f64 / num_days
+        let roi = if s.cc_spend_usd > 0.0 {
+            (s.prs_merged as f64 / s.cc_spend_usd) * 100.0
         } else {
             0.0
         };
-        (avg_per_day * 3.33).min(10.0)
-    };
-
-    let axes = [
-        session_velocity,
-        tool_reliability,
-        workflow_efficiency,
-        cost_efficiency,
-        cache_utilization,
-        scope_discipline,
-        parallel_throughput,
-    ];
-    let overall_score = axes.iter().sum::<f64>() / axes.len() as f64;
-
-    let archetype = detect_archetype(&axes);
+        SprintScore {
+            index: i as u32,
+            start_date: s.start_date.clone(),
+            end_date: s.end_date.clone(),
+            throughput_velocity: tv,
+            parallelism_ratio: pr,
+            ai_roi: roi,
+            throughput_velocity_score: score_throughput(tv),
+            parallelism_ratio_score: score_parallelism(pr),
+            ai_roi_score: score_roi(roi),
+        }
+    }).collect();
 
     DeveloperPerformanceMetrics {
-        session_velocity,
-        tool_reliability,
-        workflow_efficiency,
-        cost_efficiency,
-        cache_utilization,
-        scope_discipline,
-        parallel_throughput,
+        throughput_velocity,
+        parallelism_ratio,
+        ai_roi,
+        throughput_velocity_score,
+        parallelism_ratio_score,
+        ai_roi_score,
         archetype,
         overall_score,
-        session_count,
+        sprint_count,
+        prs_merged: total_prs,
+        total_cc_spend,
+        sprints: sprint_scores,
         baseline: None,
     }
 }
 
-/// Detect developer archetype from the 7-axis scores.
-///
-/// Axes order: [velocity, tool_reliability, workflow, cost, cache, scope, parallel]
-fn detect_archetype(axes: &[f64; 7]) -> String {
-    let [velocity, _tool, workflow, cost, cache, scope, parallel] = *axes;
-    let all_min = axes.iter().copied().fold(f64::INFINITY, f64::min);
-    let all_max = axes.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-
-    if velocity >= 8.0 && scope >= 7.0 {
-        "Velocity Master".to_string()
-    } else if cost >= 8.0 && cache >= 7.0 {
-        "Efficiency Expert".to_string()
-    } else if parallel >= 7.0 && workflow >= 6.0 {
-        "Multitasker".to_string()
-    } else if all_min >= 4.0 && axes.iter().all(|&v| v >= 5.0) {
-        "Balanced Pro".to_string()
-    } else if all_max >= 9.0 && all_min <= 4.0 {
-        "Specialist".to_string()
+/// Score throughput velocity (PRs per sprint) on 0-10 scale
+/// Based on PDF: <3 = 1-3, 3-6 = 4-6, 7-10 = 7-8, >10 = 9-10
+fn score_throughput(prs_per_sprint: f64) -> f64 {
+    if prs_per_sprint <= 0.0 {
+        0.0
+    } else if prs_per_sprint < 3.0 {
+        // Linear 0-3 maps to 1-3
+        (prs_per_sprint / 3.0 * 2.0 + 1.0).clamp(0.0, 3.0)
+    } else if prs_per_sprint <= 6.0 {
+        // Linear 3-6 maps to 4-6
+        ((prs_per_sprint - 3.0) / 3.0 * 2.0 + 4.0).clamp(4.0, 6.0)
+    } else if prs_per_sprint <= 10.0 {
+        // Linear 7-10 maps to 7-8
+        ((prs_per_sprint - 7.0) / 3.0 + 7.0).clamp(7.0, 8.0)
     } else {
-        "Developing".to_string()
+        // >10 maps to 9-10
+        ((prs_per_sprint - 10.0) / 5.0 + 9.0).clamp(9.0, 10.0)
+    }
+}
+
+/// Score parallelism ratio on 0-10 scale
+/// Based on PDF: 0-0.3 = 1-3, 0.3-0.8 = 4-6, 0.8-1.5 = 7-8, >1.5 = 9-10
+fn score_parallelism(ratio: f64) -> f64 {
+    if ratio <= 0.0 {
+        0.0
+    } else if ratio < 0.3 {
+        (ratio / 0.3 * 2.0 + 1.0).clamp(0.0, 3.0)
+    } else if ratio <= 0.8 {
+        ((ratio - 0.3) / 0.5 * 2.0 + 4.0).clamp(4.0, 6.0)
+    } else if ratio <= 1.5 {
+        ((ratio - 0.8) / 0.7 + 7.0).clamp(7.0, 8.0)
+    } else {
+        ((ratio - 1.5) / 1.0 + 9.0).clamp(9.0, 10.0)
+    }
+}
+
+/// Score AI ROI (PRs per $100 CC spend) on 0-10 scale
+/// Based on PDF: <0.5 = 1-3, 0.5-1.5 = 4-6, 1.5-3.0 = 7-8, >3.0 = 9-10
+fn score_roi(roi: f64) -> f64 {
+    if roi <= 0.0 {
+        0.0
+    } else if roi < 0.5 {
+        (roi / 0.5 * 2.0 + 1.0).clamp(0.0, 3.0)
+    } else if roi <= 1.5 {
+        ((roi - 0.5) / 1.0 * 2.0 + 4.0).clamp(4.0, 6.0)
+    } else if roi <= 3.0 {
+        ((roi - 1.5) / 1.5 + 7.0).clamp(7.0, 8.0)
+    } else {
+        ((roi - 3.0) / 3.0 + 9.0).clamp(9.0, 10.0)
+    }
+}
+
+/// Detect developer archetype from 3-axis scores.
+/// 5 archetypes from PDF:
+/// - AI-Native Power User: high all three
+/// - Volume Spammer: high throughput, low parallelism, low ROI
+/// - Deep Single-Threader: moderate throughput, low parallelism, high ROI
+/// - Expensive Explorer: low throughput, high parallelism, low ROI
+/// - Early Adopter: low all three
+fn detect_archetype(throughput: f64, parallelism: f64, roi: f64) -> String {
+    if throughput >= 7.0 && parallelism >= 7.0 && roi >= 6.0 {
+        "AI-Native Power User".to_string()
+    } else if throughput >= 7.0 && parallelism <= 4.0 && roi <= 4.0 {
+        "Volume Spammer".to_string()
+    } else if throughput >= 4.0 && parallelism <= 4.0 && roi >= 6.0 {
+        "Deep Single-Threader".to_string()
+    } else if throughput <= 5.0 && parallelism >= 5.0 && roi <= 4.0 {
+        "Expensive Explorer".to_string()
+    } else {
+        "Early Adopter".to_string()
     }
 }
 
@@ -243,142 +257,71 @@ fn detect_archetype(axes: &[f64; 7]) -> String {
 mod tests {
     use super::*;
 
-    fn make_session(
-        id: &str,
-        du: f64,
-        duration_ms: u64,
-        tools: u32,
-        errors: u32,
-        wfs: f64,
-        cpdu: f64,
-        cer: f64,
-        turns: u32,
-        date: &str,
-    ) -> SessionInput {
-        SessionInput {
-            session_id: id.to_string(),
-            duration_ms,
-            deliverable_units: du,
-            tool_count: tools,
-            error_tool_count: errors,
-            wfs,
-            cpdu,
-            cer,
-            turn_count: turns,
-            started_at: format!("{}T10:00:00Z", date),
-            is_subagent: false,
+    fn make_sprint(prs: u32, concurrent_days: u32, sprint_days: u32, spend: f64) -> SprintInput {
+        SprintInput {
+            prs_merged: prs,
+            concurrent_commit_days: concurrent_days,
+            sprint_days,
+            cc_spend_usd: spend,
+            start_date: "2026-01-01".to_string(),
+            end_date: "2026-01-15".to_string(),
         }
     }
 
     #[test]
-    fn test_empty_sessions() {
+    fn test_empty_sprints() {
         let metrics = calculate_developer_metrics(&[], None);
-        assert_eq!(metrics.session_count, 0);
+        assert_eq!(metrics.sprint_count, 0);
         assert_eq!(metrics.overall_score, 0.0);
-        assert_eq!(metrics.archetype, "Developing");
+        assert_eq!(metrics.archetype, "Early Adopter");
     }
 
     #[test]
-    fn test_single_session() {
-        let sessions = vec![make_session(
-            "s1", 5.0, 3_600_000, 50, 2, 0.1, 1.0, 0.7, 15, "2026-01-15",
-        )];
-        let metrics = calculate_developer_metrics(&sessions, None);
+    fn test_single_sprint() {
+        let sprints = vec![make_sprint(5, 3, 14, 50.0)];
+        let metrics = calculate_developer_metrics(&sprints, None);
 
-        assert_eq!(metrics.session_count, 1);
-        // velocity: 5 DU / 1 hour = 5, normalized = min(5/2, 10) = 2.5
-        assert!((metrics.session_velocity - 2.5).abs() < 0.01);
-        // tool reliability: (1 - 2/50) * 10 = 9.6
-        assert!((metrics.tool_reliability - 9.6).abs() < 0.01);
-        // workflow: (1 - 0.1) * 10 = 9.0
-        assert!((metrics.workflow_efficiency - 9.0).abs() < 0.01);
-        // cost: min(10/1.0, 10) = 10.0
-        assert!((metrics.cost_efficiency - 10.0).abs() < 0.01);
-        // cache: 0.7 * 10 = 7.0
-        assert!((metrics.cache_utilization - 7.0).abs() < 0.01);
-        assert!(metrics.overall_score > 0.0);
+        assert_eq!(metrics.sprint_count, 1);
+        assert_eq!(metrics.prs_merged, 5);
+        assert!((metrics.throughput_velocity - 5.0).abs() < 0.01);
+        assert!((metrics.parallelism_ratio - 3.0 / 14.0).abs() < 0.01);
+        assert!((metrics.ai_roi - 10.0).abs() < 0.01); // 5/50*100 = 10
+    }
+
+    #[test]
+    fn test_power_user_archetype() {
+        // High everything: 10 PRs, 12 concurrent days, 14 sprint days, $50 spend
+        let sprints = vec![make_sprint(10, 12, 14, 50.0)];
+        let metrics = calculate_developer_metrics(&sprints, None);
+        assert_eq!(metrics.archetype, "AI-Native Power User");
     }
 
     #[test]
     fn test_baseline_comparison() {
-        let current = vec![make_session(
-            "s1", 5.0, 3_600_000, 50, 2, 0.1, 1.0, 0.7, 15, "2026-02-15",
-        )];
-        let baseline = vec![make_session(
-            "s0", 3.0, 3_600_000, 40, 5, 0.3, 2.0, 0.5, 20, "2026-01-15",
-        )];
+        let current = vec![make_sprint(8, 6, 14, 40.0)];
+        let baseline = vec![make_sprint(4, 2, 14, 60.0)];
         let metrics = calculate_developer_metrics(&current, Some(&baseline));
 
         assert!(metrics.baseline.is_some());
         let bl = metrics.baseline.as_ref().unwrap();
-        assert_eq!(bl.session_count, 1);
-        assert!(bl.baseline.is_none()); // No nested baselines
+        assert_eq!(bl.prs_merged, 4);
+        assert!(bl.baseline.is_none());
     }
 
     #[test]
-    fn test_archetype_velocity_master() {
-        // High velocity (needs raw DU/hour >= 16 -> normalized = 16/2 = 8)
-        // and scope >= 7
-        let sessions = vec![
-            make_session("s1", 20.0, 3_600_000, 50, 0, 0.0, 1.0, 0.5, 10, "2026-01-15"),
-            make_session("s2", 12.0, 3_600_000, 40, 0, 0.0, 1.0, 0.5, 8, "2026-01-16"),
-        ];
-        let metrics = calculate_developer_metrics(&sessions, None);
-        assert_eq!(metrics.archetype, "Velocity Master");
+    fn test_scores_bounded() {
+        let sprints = vec![make_sprint(50, 14, 14, 10.0)];
+        let metrics = calculate_developer_metrics(&sprints, None);
+        assert!(metrics.throughput_velocity_score >= 0.0 && metrics.throughput_velocity_score <= 10.0);
+        assert!(metrics.parallelism_ratio_score >= 0.0 && metrics.parallelism_ratio_score <= 10.0);
+        assert!(metrics.ai_roi_score >= 0.0 && metrics.ai_roi_score <= 10.0);
     }
 
     #[test]
-    fn test_archetype_efficiency_expert() {
-        let sessions = vec![
-            make_session("s1", 5.0, 3_600_000, 50, 0, 0.0, 0.5, 0.8, 10, "2026-01-15"),
-            make_session("s2", 5.0, 3_600_000, 40, 0, 0.0, 0.5, 0.75, 12, "2026-01-16"),
-        ];
-        let metrics = calculate_developer_metrics(&sessions, None);
-        // cost_efficiency = min(10/0.5, 10) = 10, cache = 0.775*10 = 7.75
-        assert_eq!(metrics.archetype, "Efficiency Expert");
-    }
-
-    #[test]
-    fn test_parallel_throughput() {
-        // 6 sessions across 2 days => avg 3/day => 3 * 3.33 = 9.99
-        let sessions: Vec<SessionInput> = (0..6)
-            .map(|i| {
-                let date = if i < 3 { "2026-01-15" } else { "2026-01-16" };
-                make_session(
-                    &format!("s{}", i),
-                    2.0,
-                    1_800_000,
-                    20,
-                    0,
-                    0.1,
-                    1.0,
-                    0.5,
-                    10,
-                    date,
-                )
-            })
-            .collect();
-        let metrics = calculate_developer_metrics(&sessions, None);
-        assert!((metrics.parallel_throughput - 9.99).abs() < 0.1);
-    }
-
-    #[test]
-    fn test_all_axes_bounded() {
-        let sessions = vec![
-            make_session("s1", 100.0, 100, 1000, 0, 0.0, 0.01, 1.0, 5, "2026-01-15"),
-        ];
-        let metrics = calculate_developer_metrics(&sessions, None);
-        let axes = [
-            metrics.session_velocity,
-            metrics.tool_reliability,
-            metrics.workflow_efficiency,
-            metrics.cost_efficiency,
-            metrics.cache_utilization,
-            metrics.scope_discipline,
-            metrics.parallel_throughput,
-        ];
-        for (i, &v) in axes.iter().enumerate() {
-            assert!(v >= 0.0 && v <= 10.0, "Axis {} out of bounds: {}", i, v);
-        }
+    fn test_zero_spend_roi() {
+        let sprints = vec![make_sprint(5, 3, 14, 0.0)];
+        let metrics = calculate_developer_metrics(&sprints, None);
+        assert_eq!(metrics.ai_roi, 0.0);
+        assert_eq!(metrics.ai_roi_score, 0.0);
     }
 }

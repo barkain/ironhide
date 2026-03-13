@@ -11,6 +11,7 @@
 pub mod commands;
 pub mod db;
 pub mod export;
+pub mod github;
 pub mod metrics;
 pub mod models;
 pub mod parser;
@@ -148,6 +149,7 @@ pub fn run() {
             // Anti-pattern detection commands
             commands::detect_antipatterns,
             // Developer performance commands
+            commands::detect_github_config,
             commands::get_developer_metrics,
         ])
         .setup(|app| {

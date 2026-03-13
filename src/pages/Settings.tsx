@@ -2,21 +2,37 @@ import { useState, useEffect } from 'react';
 import { Header } from '../components/layout/Header';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { getSettings, updateSettings, type AppSettings } from '../lib/tauri';
+import { getSettings, updateSettings, detectGitHubConfig, type AppSettings, type GitHubConfig } from '../lib/tauri';
 import { useAppStore } from '../lib/store';
-import { FolderOpen, RefreshCw, Sun, Moon, Save } from 'lucide-react';
+import { FolderOpen, RefreshCw, Sun, Moon, Save, GitBranch } from 'lucide-react';
 
 function Settings() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+  const [githubConfig, setGithubConfig] = useState<GitHubConfig | null>(null);
 
   const { theme, setTheme } = useAppStore();
 
   useEffect(() => {
     loadSettings();
   }, []);
+
+  useEffect(() => {
+    detectGitHubConfig().then((config) => {
+      setGithubConfig(config);
+      // Auto-populate username from detected value if empty and persist immediately
+      if (settings) {
+        if (!settings.githubUsername && config.username) {
+          const updates = { githubUsername: config.username };
+          setSettings({ ...settings, ...updates });
+          setHasChanges(true);
+          updateSettings(updates);
+        }
+      }
+    }).catch(console.error);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadSettings() {
     try {
@@ -30,6 +46,9 @@ function Settings() {
         autoRefresh: true,
         refreshIntervalMinutes: 5,
         theme: 'dark',
+        githubUsername: '',
+        sprintDays: 14,
+        numSprints: 4,
       });
     } finally {
       setIsLoading(false);
@@ -89,6 +108,82 @@ function Settings() {
       />
 
       <div className="flex-1 p-6 space-y-6 max-w-2xl">
+        {/* GitHub Integration */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <GitBranch className="h-5 w-5 text-[var(--color-primary-400)]" />
+              <CardTitle>GitHub Integration</CardTitle>
+            </div>
+            <CardDescription>
+              Connect to GitHub for AI adoption metrics (throughput, parallelism, ROI)
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Auth Status */}
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-[var(--color-background)]">
+              {githubConfig?.has_token ? (
+                <>
+                  <div className="h-3 w-3 rounded-full bg-green-400" />
+                  <span className="text-sm text-green-400 font-medium">Authenticated</span>
+                  <span className="text-xs text-[var(--color-text-muted)]">
+                    via {githubConfig.token_source === 'gh_cli' ? 'gh CLI' : githubConfig.token_source}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <div className="h-3 w-3 rounded-full bg-red-400" />
+                  <span className="text-sm text-red-400 font-medium">Not authenticated</span>
+                  <span className="text-xs text-[var(--color-text-muted)]">
+                    Run <code className="px-1 py-0.5 rounded bg-[var(--color-surface-alt)] text-fuchsia-300">gh auth login</code> or set <code className="px-1 py-0.5 rounded bg-[var(--color-surface-alt)] text-fuchsia-300">GITHUB_TOKEN</code>
+                  </span>
+                </>
+              )}
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-2">
+                  GitHub Username
+                </label>
+                <input
+                  type="text"
+                  value={settings?.githubUsername || ''}
+                  onChange={(e) => handleChange('githubUsername', e.target.value)}
+                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-4 py-2 text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary-500)]"
+                  placeholder={githubConfig?.username || 'octocat'}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-2">
+                  Sprint Length (days)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={90}
+                  value={settings?.sprintDays || 14}
+                  onChange={(e) => handleChange('sprintDays', parseInt(e.target.value, 10) || 14)}
+                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-4 py-2 text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary-500)]"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-2">
+                  Sprints to Analyze
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={26}
+                  value={settings?.numSprints || 4}
+                  onChange={(e) => handleChange('numSprints', parseInt(e.target.value, 10) || 4)}
+                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] px-4 py-2 text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-primary-500)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary-500)]"
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Data Source */}
         <Card>
           <CardHeader>

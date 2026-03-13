@@ -187,18 +187,33 @@ export interface SubagentSummary {
 // Developer Performance Types
 // ============================================================================
 
-/** Developer performance metrics (7-axis spider chart, 0-10 scale) */
+/** Per-sprint computed scores */
+export interface SprintScore {
+  index: number;
+  start_date: string;
+  end_date: string;
+  throughput_velocity: number;
+  parallelism_ratio: number;
+  ai_roi: number;
+  throughput_velocity_score: number;
+  parallelism_ratio_score: number;
+  ai_roi_score: number;
+}
+
+/** Developer AI Adoption Metrics (3-axis, 0-10 scale) */
 export interface DeveloperPerformanceMetrics {
-  session_velocity: number;
-  tool_reliability: number;
-  workflow_efficiency: number;
-  cost_efficiency: number;
-  cache_utilization: number;
-  scope_discipline: number;
-  parallel_throughput: number;
+  throughput_velocity: number;
+  parallelism_ratio: number;
+  ai_roi: number;
+  throughput_velocity_score: number;
+  parallelism_ratio_score: number;
+  ai_roi_score: number;
   archetype: string;
   overall_score: number;
-  session_count: number;
+  sprint_count: number;
+  prs_merged: number;
+  total_cc_spend: number;
+  sprints: SprintScore[];
   baseline: DeveloperPerformanceMetrics | null;
 }
 

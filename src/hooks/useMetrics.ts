@@ -94,14 +94,21 @@ export function useProjectMetrics() {
 // Developer Performance
 // ============================================================================
 
-/** Fetch developer performance metrics (7-axis spider chart) */
-export function useDeveloperMetrics(days?: number) {
+/** Fetch developer performance metrics (3-axis AI adoption) */
+export function useDeveloperMetrics(settings: {
+  githubUsername: string;
+  sprintDays?: number;
+  numSprints?: number;
+}) {
+  const hasConfig = Boolean(settings.githubUsername);
+
   return useQuery<DeveloperPerformanceMetrics>({
-    queryKey: ['developerMetrics', days],
-    queryFn: () => getDeveloperMetrics(days),
+    queryKey: ['developerMetrics', settings.githubUsername, settings.sprintDays, settings.numSprints],
+    queryFn: () => getDeveloperMetrics(settings),
     staleTime: METRICS_STALE_TIME,
     gcTime: METRICS_GC_TIME,
     placeholderData: keepPreviousData,
+    enabled: hasConfig,
   });
 }
 

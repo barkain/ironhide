@@ -202,35 +202,71 @@ pub struct EfficiencyTrendPoint {
     pub sessions: u32,
 }
 
-/// Developer performance metrics response (7-axis spider chart)
+/// GitHub configuration auto-detected from environment
+#[derive(Debug, Clone, Serialize)]
+pub struct GitHubConfigResponse {
+    pub has_token: bool,
+    pub token_source: Option<String>,  // "gh_cli", "GITHUB_TOKEN", "GH_TOKEN"
+    pub username: Option<String>,
+}
+
+/// Per-sprint scores for bubble rendering
+#[derive(Debug, Clone, Serialize)]
+pub struct SprintScoreResponse {
+    pub index: u32,
+    pub start_date: String,
+    pub end_date: String,
+    pub throughput_velocity: f64,
+    pub parallelism_ratio: f64,
+    pub ai_roi: f64,
+    pub throughput_velocity_score: f64,
+    pub parallelism_ratio_score: f64,
+    pub ai_roi_score: f64,
+}
+
+/// Developer performance metrics response (3-axis AI adoption metrics)
 #[derive(Debug, Clone, Serialize)]
 pub struct DeveloperPerformanceResponse {
-    pub session_velocity: f64,
-    pub tool_reliability: f64,
-    pub workflow_efficiency: f64,
-    pub cost_efficiency: f64,
-    pub cache_utilization: f64,
-    pub scope_discipline: f64,
-    pub parallel_throughput: f64,
+    pub throughput_velocity: f64,
+    pub parallelism_ratio: f64,
+    pub ai_roi: f64,
+    pub throughput_velocity_score: f64,
+    pub parallelism_ratio_score: f64,
+    pub ai_roi_score: f64,
     pub archetype: String,
     pub overall_score: f64,
-    pub session_count: u32,
+    pub sprint_count: u32,
+    pub prs_merged: u32,
+    pub total_cc_spend: f64,
+    pub sprints: Vec<SprintScoreResponse>,
     pub baseline: Option<Box<DeveloperPerformanceResponse>>,
 }
 
 impl From<crate::metrics::developer::DeveloperPerformanceMetrics> for DeveloperPerformanceResponse {
     fn from(m: crate::metrics::developer::DeveloperPerformanceMetrics) -> Self {
         Self {
-            session_velocity: m.session_velocity,
-            tool_reliability: m.tool_reliability,
-            workflow_efficiency: m.workflow_efficiency,
-            cost_efficiency: m.cost_efficiency,
-            cache_utilization: m.cache_utilization,
-            scope_discipline: m.scope_discipline,
-            parallel_throughput: m.parallel_throughput,
+            throughput_velocity: m.throughput_velocity,
+            parallelism_ratio: m.parallelism_ratio,
+            ai_roi: m.ai_roi,
+            throughput_velocity_score: m.throughput_velocity_score,
+            parallelism_ratio_score: m.parallelism_ratio_score,
+            ai_roi_score: m.ai_roi_score,
             archetype: m.archetype,
             overall_score: m.overall_score,
-            session_count: m.session_count,
+            sprint_count: m.sprint_count,
+            prs_merged: m.prs_merged,
+            total_cc_spend: m.total_cc_spend,
+            sprints: m.sprints.iter().map(|s| SprintScoreResponse {
+                index: s.index,
+                start_date: s.start_date.clone(),
+                end_date: s.end_date.clone(),
+                throughput_velocity: s.throughput_velocity,
+                parallelism_ratio: s.parallelism_ratio,
+                ai_roi: s.ai_roi,
+                throughput_velocity_score: s.throughput_velocity_score,
+                parallelism_ratio_score: s.parallelism_ratio_score,
+                ai_roi_score: s.ai_roi_score,
+            }).collect(),
             baseline: m.baseline.map(|b| Box::new(Self::from(*b))),
         }
     }
@@ -3143,166 +3179,145 @@ pub async fn detect_antipatterns(
 // Developer Performance Commands
 // ============================================================================
 
-/// Get developer performance metrics (7-axis spider chart)
+/// Auto-detect GitHub configuration from environment.
 ///
-/// Analyzes sessions from the last `days` (default 90) and computes:
-/// - Session Velocity, Tool Reliability, Workflow Efficiency,
-///   Cost Efficiency, Cache Utilization, Scope Discipline, Parallel Throughput
+/// Checks gh CLI auth, env vars, and git remote to determine available config.
+#[tauri::command]
+pub async fn detect_github_config() -> Result<GitHubConfigResponse, CommandError> {
+    use crate::github::{detect_github_token, detect_github_username};
+
+    let token = detect_github_token();
+    let token_source = if token.is_some() {
+        // Determine source
+        if std::process::Command::new("gh").args(["auth", "token"]).output()
+            .map(|o| o.status.success()).unwrap_or(false) {
+            Some("gh_cli".to_string())
+        } else if std::env::var("GITHUB_TOKEN").is_ok() {
+            Some("GITHUB_TOKEN".to_string())
+        } else {
+            Some("GH_TOKEN".to_string())
+        }
+    } else {
+        None
+    };
+
+    let username = detect_github_username();
+
+    Ok(GitHubConfigResponse {
+        has_token: token.is_some(),
+        token_source,
+        username,
+    })
+}
+
+/// Get developer performance metrics (3-axis AI adoption metrics)
 ///
-/// Also returns a baseline from the prior 30-day window for comparison.
-///
-/// Heavy session parsing is offloaded to a blocking thread via `spawn_blocking`
-/// to avoid freezing the Tokio runtime (and thus the UI).
+/// Requires GitHub integration: owner, repo, and username. Token is auto-detected.
+/// `sprint_days` configures the sprint length (default 14).
+/// Analyzes the last 4 sprints and uses the 4 sprints before that as baseline.
 #[tauri::command]
 pub async fn get_developer_metrics(
     _state: tauri::State<'_, AppState>,
-    days: Option<u32>,
+    github_username: String,
+    sprint_days: Option<u32>,
+    num_sprints: Option<u32>,
 ) -> Result<DeveloperPerformanceResponse, CommandError> {
-    // Offload all heavy synchronous work (session iteration, JSONL parsing,
-    // metrics computation) to a blocking thread so the async runtime stays
-    // responsive and the UI does not freeze.
-    tokio::task::spawn_blocking(move || {
-        compute_developer_metrics_sync(days)
-    })
-    .await
-    .map_err(|e| CommandError::Internal(format!("Task join error: {}", e)))?
+    use crate::github::{detect_github_token, fetch_sprint_github_data};
+    use crate::metrics::developer::{calculate_developer_metrics, SprintInput};
+
+    let token = detect_github_token()
+        .ok_or_else(|| CommandError::Internal(
+            "No GitHub token found. Install gh CLI and run 'gh auth login', or set GITHUB_TOKEN env var.".to_string()
+        ))?;
+
+    let sprint_len = sprint_days.unwrap_or(14);
+    let now = chrono::Utc::now();
+
+    // Analyze N recent sprints + N baseline sprints = 2N total
+    let analysis_sprints = num_sprints.unwrap_or(4);
+    let total_sprints = analysis_sprints * 2;
+
+    let mut all_sprint_inputs: Vec<SprintInput> = Vec::new();
+
+    for i in 0..total_sprints {
+        let sprint_end = now - chrono::Duration::days((i * sprint_len) as i64);
+        let sprint_start = sprint_end - chrono::Duration::days(sprint_len as i64);
+
+        let since = sprint_start.format("%Y-%m-%d").to_string();
+        let until = sprint_end.format("%Y-%m-%d").to_string();
+
+        // Fetch GitHub data for this sprint (searches across all repos)
+        let github_data = fetch_sprint_github_data(
+            &token,
+            &github_username,
+            &since,
+            &until,
+            sprint_len,
+        )
+        .await
+        .map_err(|e| CommandError::Internal(e))?;
+
+        // Calculate CC spend for this sprint window from local sessions
+        let cc_spend = compute_cc_spend_for_range(&sprint_start, &sprint_end);
+
+        all_sprint_inputs.push(SprintInput {
+            prs_merged: github_data.prs_merged,
+            concurrent_commit_days: github_data.concurrent_commit_days,
+            sprint_days: sprint_len,
+            cc_spend_usd: cc_spend,
+            start_date: since.clone(),
+            end_date: until.clone(),
+        });
+    }
+
+    // First 4 are analysis (most recent), last 4 are baseline
+    // Note: they're in reverse chronological order (0=most recent)
+    let analysis: Vec<SprintInput> = all_sprint_inputs[..analysis_sprints as usize].to_vec();
+    let baseline: Vec<SprintInput> = all_sprint_inputs[analysis_sprints as usize..].to_vec();
+
+    let baseline_ref = if baseline.iter().any(|s| s.prs_merged > 0) {
+        Some(baseline.as_slice())
+    } else {
+        None
+    };
+
+    let metrics = calculate_developer_metrics(&analysis, baseline_ref);
+    Ok(DeveloperPerformanceResponse::from(metrics))
 }
 
-/// Synchronous implementation of developer metrics computation.
-///
-/// Separated from the async command so it can run inside `spawn_blocking`.
-/// Uses `get_session_turns` (in-memory cache + JSONL fallback) instead of
-/// `get_session_turns_with_db_cache` to avoid needing `&AppState` across
-/// the thread boundary.
-fn compute_developer_metrics_sync(
-    days: Option<u32>,
-) -> Result<DeveloperPerformanceResponse, CommandError> {
-    use crate::metrics::developer::{calculate_developer_metrics, SessionInput};
-
-    let analysis_days = days.unwrap_or(90);
-    let baseline_days = 30u32;
-
-    let now = chrono::Utc::now();
-    let analysis_start = now - chrono::Duration::days(analysis_days as i64);
-    let baseline_start = analysis_start - chrono::Duration::days(baseline_days as i64);
-
-    // Get all sessions
+/// Compute total Claude Code spend for a date range from local session data.
+fn compute_cc_spend_for_range(
+    start: &chrono::DateTime<chrono::Utc>,
+    end: &chrono::DateTime<chrono::Utc>,
+) -> f64 {
     let all_sessions = get_cached_session_list();
-
-    // Build session inputs, filtering out subagents and sessions outside time range
-    let mut analysis_inputs: Vec<SessionInput> = Vec::new();
-    let mut baseline_inputs: Vec<SessionInput> = Vec::new();
+    let mut total_cost = 0.0;
 
     for file_info in &all_sessions {
         if file_info.is_subagent {
             continue;
         }
 
-        let summary = get_cached_summary(file_info);
+        let summary = get_cached_summary(&file_info);
         if summary.total_turns == 0 {
             continue;
         }
 
-        // Filter by project path
         if !is_real_user_project(&summary.project_path) {
             continue;
         }
 
-        // Parse timestamp
         let started = match chrono::DateTime::parse_from_rfc3339(&summary.started_at) {
             Ok(dt) => dt.with_timezone(&chrono::Utc),
             Err(_) => continue,
         };
 
-        let is_in_analysis = started >= analysis_start;
-        let is_in_baseline = started >= baseline_start && started < analysis_start;
-
-        if !is_in_analysis && !is_in_baseline {
-            continue;
-        }
-
-        // Get detailed metrics for this session using in-memory cache + JSONL fallback.
-        // We use get_session_turns (no DB cache) because AppState is not available
-        // on this blocking thread, and the in-memory cache is typically warm after
-        // preload_all_sessions runs at startup.
-        let (turns, _file_info) = match get_session_turns(&file_info.session_id) {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-
-        if turns.is_empty() {
-            continue;
-        }
-
-        let (session_tokens, total_breakdown, _unique_tools, _models, tool_count, _subagent_count, duration_ms) =
-            calculate_metrics_from_turns(&turns);
-
-        let turn_data: Vec<(u64, u32)> = turns.iter().map(|t| (t.output_tokens, t.tool_count)).collect();
-        let deliverable_units = estimate_deliverable_units_v2(tool_count, &turn_data);
-        let rework_cycles = detect_rework_cycles(&turns);
-        let clarification_cycles = detect_clarification_cycles(&turns);
-        let turn_count = turns.len() as u32;
-
-        // WFS
-        let wfs = if turn_count > 0 {
-            (rework_cycles + clarification_cycles) as f64 / turn_count as f64
-        } else {
-            0.0
-        };
-
-        // CPDU
-        let cpdu = if deliverable_units > 0.0 {
-            total_breakdown.total_cost / deliverable_units
-        } else {
-            total_breakdown.total_cost
-        };
-
-        // CER
-        let cer = {
-            let total_cache = session_tokens.total_cache();
-            if total_cache > 0 {
-                session_tokens.total_cache_read as f64 / total_cache as f64
-            } else {
-                0.0
-            }
-        };
-
-        // Count error tool uses (tool uses that resulted in errors)
-        let error_tool_count = turns
-            .iter()
-            .flat_map(|t| &t.tool_uses)
-            .filter(|tu| tu.is_error)
-            .count() as u32;
-
-        let input = SessionInput {
-            session_id: file_info.session_id.clone(),
-            duration_ms,
-            deliverable_units,
-            tool_count,
-            error_tool_count,
-            wfs,
-            cpdu,
-            cer,
-            turn_count,
-            started_at: summary.started_at.clone(),
-            is_subagent: false,
-        };
-
-        if is_in_analysis {
-            analysis_inputs.push(input);
-        } else if is_in_baseline {
-            baseline_inputs.push(input);
+        if started >= *start && started < *end {
+            total_cost += summary.total_cost;
         }
     }
 
-    let baseline = if baseline_inputs.is_empty() {
-        None
-    } else {
-        Some(baseline_inputs.as_slice())
-    };
-
-    let metrics = calculate_developer_metrics(&analysis_inputs, baseline);
-    Ok(DeveloperPerformanceResponse::from(metrics))
+    total_cost
 }
 
 // ============================================================================
