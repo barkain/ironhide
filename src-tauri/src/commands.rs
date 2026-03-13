@@ -3230,12 +3230,12 @@ pub async fn get_developer_metrics(
             "No GitHub token found. Install gh CLI and run 'gh auth login', or set GITHUB_TOKEN env var.".to_string()
         ))?;
 
-    let sprint_len = sprint_days.unwrap_or(14);
+    let sprint_len = sprint_days.unwrap_or(14).clamp(1, 90);
     let now = chrono::Utc::now();
 
     // Analyze N recent sprints + N baseline sprints = 2N total
-    let analysis_sprints = num_sprints.unwrap_or(4);
-    let total_sprints = analysis_sprints * 2;
+    let analysis_sprints = num_sprints.unwrap_or(4).clamp(1, 26);
+    let total_sprints = analysis_sprints.saturating_mul(2);
 
     // Bug 4 fix: create HTTP client once and reuse across all sprint fetches
     let client = reqwest::Client::new();
